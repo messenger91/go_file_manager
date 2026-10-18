@@ -20,6 +20,9 @@
     confirmCancel: document.getElementById("confirm-cancel"),
     filter: document.getElementById("filter"),
     itemCount: document.getElementById("item-count"),
+    viewToggle: document.getElementById("view-toggle"),
+    listing: document.querySelector(".listing"),
+    grid: document.getElementById("grid"),
   };
 
   const sortButtons = Array.prototype.slice.call(document.querySelectorAll(".sort"));
@@ -30,6 +33,7 @@
   let filterText = "";
   let sortKey = "name";
   let sortDir = "asc";
+  let viewMode = localStorage.getItem("view") === "grid" ? "grid" : "list";
 
   // --- theme ---
   function applyTheme(theme) {
@@ -42,6 +46,23 @@
 
   els.themeToggle.addEventListener("click", function () {
     applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
+  });
+
+  // --- view mode ---
+  function applyView(mode) {
+    viewMode = mode;
+    localStorage.setItem("view", mode);
+    document.body.dataset.view = mode;
+    els.grid.hidden = mode !== "grid";
+    els.viewToggle.textContent = mode === "grid" ? "▤" : "▦";
+    const label = mode === "grid" ? "Switch to list view" : "Switch to grid view";
+    els.viewToggle.title = label;
+    els.viewToggle.setAttribute("aria-label", label);
+    renderList();
+  }
+
+  els.viewToggle.addEventListener("click", function () {
+    applyView(viewMode === "grid" ? "list" : "grid");
   });
 
   // --- helpers ---
@@ -202,10 +223,19 @@
         : shown + " of " + total + " items";
   }
 
+  function emptyText() {
+    return currentEntries.length === 0 ? "This folder is empty." : "No files match your filter.";
+  }
+
   function renderList() {
     updateSortIndicators();
     const entries = visibleEntries();
     updateCount(currentEntries.length, entries.length);
+    if (viewMode === "grid") renderGrid(entries);
+    else renderTable(entries);
+  }
+
+  function renderTable(entries) {
     els.body.textContent = "";
 
     if (entries.length === 0) {
@@ -213,7 +243,7 @@
       const td = document.createElement("td");
       td.colSpan = 4;
       td.className = "empty";
-      td.textContent = currentEntries.length === 0 ? "This folder is empty." : "No files match your filter.";
+      td.textContent = emptyText();
       tr.appendChild(td);
       els.body.appendChild(tr);
       return;
@@ -264,6 +294,66 @@
         showContextMenu(e.clientX, e.clientY, entry);
       });
       els.body.appendChild(tr);
+    });
+  }
+
+  function renderGrid(entries) {
+    els.grid.textContent = "";
+
+    if (entries.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "empty";
+      empty.textContent = emptyText();
+      els.grid.appendChild(empty);
+      return;
+    }
+
+    entries.forEach(function (entry) {
+      const card = document.createElement("div");
+      card.className = "card " + (entry.isDir ? "dir" : "file");
+      card.tabIndex = 0;
+
+      const icon = document.createElement("div");
+      icon.className = "card-icon";
+      icon.textContent = iconFor(entry);
+
+      const name = document.createElement("div");
+      name.className = "card-name";
+      name.textContent = entry.name;
+      name.title = entry.name;
+
+      const meta = document.createElement("div");
+      meta.className = "card-meta";
+      meta.textContent = entry.isDir ? "Folder" : formatSize(entry.size);
+
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "btn danger card-delete";
+      deleteBtn.title = "Delete";
+      deleteBtn.setAttribute("aria-label", "Delete " + entry.name);
+      deleteBtn.textContent = "🗑";
+      deleteBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        deleteEntry(entry);
+      });
+
+      card.append(icon, name, meta, deleteBtn);
+      card.addEventListener("click", function () {
+        if (entry.isDir) navigate(entry.path);
+        else openFile(entry);
+      });
+      card.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          if (entry.isDir) navigate(entry.path);
+          else openFile(entry);
+        }
+      });
+      card.addEventListener("contextmenu", function (e) {
+        e.preventDefault();
+        showContextMenu(e.clientX, e.clientY, entry);
+      });
+      els.grid.appendChild(card);
     });
   }
 
@@ -380,25 +470,28 @@
     els.contextMenu.textContent = "";
   }
 
-  function showContextMenu(x, y, entry) {
-    const items = entry.isDir
-      ? [
-          { label: "Open", action: function () { navigate(entry.path); } },
-          { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
-        ]
-      : [
-          { label: "Preview", action: function () { openFile(entry); } },
-          { label: "Download", action: function () { downloadEntry(entry); } },
-          { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
-        ];
+  function viewMenuItems() {
+    return [
+      { label: "List view", checked: viewMode === "list", action: function () { applyView("list"); } },
+      { label: "Grid view", checked: viewMode === "grid", action: function () { applyView("grid"); } },
+    ];
+  }
 
+  function buildMenu(x, y, items) {
     els.contextMenu.textContent = "";
     items.forEach(function (item) {
+      if (item.separator) {
+        const sep = document.createElement("div");
+        sep.className = "context-sep";
+        els.contextMenu.appendChild(sep);
+        return;
+      }
       const button = document.createElement("button");
       button.type = "button";
-      button.className = "context-item" + (item.danger ? " danger" : "");
+      button.className =
+        "context-item" + (item.danger ? " danger" : "") + (item.checked ? " checked" : "");
       button.setAttribute("role", "menuitem");
-      button.textContent = item.label;
+      button.textContent = (item.checked ? "✓ " : "") + item.label;
       button.addEventListener("click", function () {
         hideContextMenu();
         item.action();
@@ -412,10 +505,40 @@
     els.contextMenu.style.top = Math.min(y, window.innerHeight - rect.height - 8) + "px";
   }
 
+  function showContextMenu(x, y, entry) {
+    const items = entry.isDir
+      ? [
+          { label: "Open", action: function () { navigate(entry.path); } },
+          { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
+        ]
+      : [
+          { label: "Preview", action: function () { openFile(entry); } },
+          { label: "Download", action: function () { downloadEntry(entry); } },
+          { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
+        ];
+    items.push({ separator: true });
+    items.push.apply(items, viewMenuItems());
+    buildMenu(x, y, items);
+  }
+
+  function showViewMenu(x, y) {
+    buildMenu(x, y, viewMenuItems());
+  }
+
   document.addEventListener("click", hideContextMenu);
   document.addEventListener("contextmenu", function (e) {
-    // Right-click outside of a row closes the menu and keeps default behavior.
-    if (!e.target.closest("tr")) hideContextMenu();
+    // Right-click outside of the file area closes the menu and keeps the native menu.
+    if (!e.target.closest(".listing") && !e.target.closest(".grid")) hideContextMenu();
+  });
+  els.listing.addEventListener("contextmenu", function (e) {
+    if (e.target.closest("tr")) return;
+    e.preventDefault();
+    showViewMenu(e.clientX, e.clientY);
+  });
+  els.grid.addEventListener("contextmenu", function (e) {
+    if (e.target.closest(".card")) return;
+    e.preventDefault();
+    showViewMenu(e.clientX, e.clientY);
   });
   window.addEventListener("scroll", hideContextMenu, true);
   window.addEventListener("resize", hideContextMenu);
@@ -461,5 +584,6 @@
     });
   });
 
+  applyView(viewMode);
   navigate(currentPath);
 })();

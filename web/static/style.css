@@ -356,6 +356,16 @@ main {
   background: var(--danger-bg);
 }
 
+.context-item.checked {
+  color: var(--accent);
+}
+
+.context-sep {
+  height: 1px;
+  margin: 0.3rem 0.2rem;
+  background: var(--border);
+}
+
 /* --- confirmation dialog --- */
 .modal {
   position: fixed;
@@ -458,6 +468,98 @@ main {
   line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* --- grid view --- */
+body[data-view="grid"] .listing {
+  display: none;
+}
+
+body[data-view="list"] .grid {
+  display: none;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+/* The `hidden` attribute must beat the display rule above. */
+.grid[hidden] {
+  display: none;
+}
+
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1rem 0.6rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  text-align: center;
+}
+
+.card:hover,
+.card:focus-visible {
+  background: var(--hover);
+  border-color: var(--accent);
+  outline: none;
+}
+
+.card-icon {
+  font-size: 2rem;
+  line-height: 1;
+}
+
+.card-name {
+  font-size: 0.85rem;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.card.dir .card-name {
+  font-weight: 600;
+}
+
+.card-meta {
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.card-delete {
+  position: absolute;
+  top: 0.35rem;
+  right: 0.35rem;
+  opacity: 0.5;
+  padding: 0.2rem 0.4rem;
+  transition: opacity 0.15s ease;
+}
+
+.card:hover .card-delete,
+.card-delete:focus {
+  opacity: 1;
+}
+
+.grid .empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--muted);
+  padding: 2rem;
+}
+
+@media (hover: none) {
+  .card-delete {
+    opacity: 1;
+  }
 }
 
 @media (max-width: 600px) {
