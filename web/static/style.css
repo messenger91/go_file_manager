@@ -607,7 +607,7 @@ body[data-view="list"] .grid {
   padding: 2rem;
 }
 
-/* --- footer / disk usage --- */
+/* --- footer / resource usage --- */
 .footer {
   margin-top: 1rem;
   padding: 0.6rem 0.9rem;
@@ -620,7 +620,7 @@ body[data-view="list"] .grid {
   display: none;
 }
 
-.disk {
+.usage {
   display: flex;
   align-items: center;
   gap: 0.75rem;
@@ -628,12 +628,22 @@ body[data-view="list"] .grid {
   color: var(--muted);
 }
 
-.disk-label {
+.usage[hidden] {
+  display: none;
+}
+
+.usage + .usage {
+  margin-top: 0.4rem;
+}
+
+.usage-label {
+  flex: 0 0 auto;
+  min-width: 2.6rem;
   font-weight: 600;
   color: var(--text);
 }
 
-.disk-bar {
+.usage-bar {
   flex: 1;
   height: 8px;
   background: var(--surface-2);
@@ -642,18 +652,18 @@ body[data-view="list"] .grid {
   overflow: hidden;
 }
 
-.disk-bar-fill {
+.usage-bar-fill {
   height: 100%;
   width: 0;
   background: var(--accent);
   transition: width 0.3s ease;
 }
 
-.disk-bar-fill.warn {
+.usage-bar-fill.warn {
   background: var(--danger);
 }
 
-.disk-text {
+.usage-text {
   white-space: nowrap;
 }
 

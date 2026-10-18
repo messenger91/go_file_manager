@@ -52,10 +52,15 @@
     </table>
     <div class="grid" id="grid" hidden></div>
     <footer class="footer" id="footer" hidden>
-      <div class="disk">
-        <span class="disk-label">Disk</span>
-        <div class="disk-bar"><div class="disk-bar-fill" id="disk-fill"></div></div>
-        <span class="disk-text" id="disk-text" aria-live="polite"></span>
+      <div class="usage" id="disk-row">
+        <span class="usage-label">Disk</span>
+        <div class="usage-bar"><div class="usage-bar-fill" id="disk-fill"></div></div>
+        <span class="usage-text" id="disk-text" aria-live="polite"></span>
+      </div>
+      <div class="usage" id="mem-row" hidden>
+        <span class="usage-label">RAM</span>
+        <div class="usage-bar"><div class="usage-bar-fill" id="mem-fill"></div></div>
+        <span class="usage-text" id="mem-text" aria-live="polite"></span>
       </div>
       <div class="host" id="host-info"></div>
     </footer>

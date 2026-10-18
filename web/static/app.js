@@ -32,8 +32,12 @@
     filter: document.getElementById("filter"),
     itemCount: document.getElementById("item-count"),
     footer: document.getElementById("footer"),
+    diskRow: document.getElementById("disk-row"),
     diskFill: document.getElementById("disk-fill"),
     diskText: document.getElementById("disk-text"),
+    memRow: document.getElementById("mem-row"),
+    memFill: document.getElementById("mem-fill"),
+    memText: document.getElementById("mem-text"),
     hostInfo: document.getElementById("host-info"),
     viewToggle: document.getElementById("view-toggle"),
     listing: document.querySelector(".listing"),
@@ -288,20 +292,48 @@
 
     const disk = info && info.disk;
     if (disk && disk.totalBytes) {
-      const total = disk.totalBytes;
-      const free = disk.freeBytes || 0;
       const used = disk.usedBytes || 0;
+      const free = disk.freeBytes || 0;
       // Match `df`: the reserved blocks are excluded from both used and free.
       const denom = used + free;
-      const percent = denom > 0 ? Math.min(100, Math.round((used / denom) * 100)) : 0;
-      els.diskFill.style.width = percent + "%";
-      els.diskFill.classList.toggle("warn", percent >= 90);
-      els.diskText.textContent =
-        formatSize(used) + " used · " + formatSize(free) + " free of " + formatSize(total);
+      const percent = denom > 0 ? (used / denom) * 100 : 0;
+      setMeter(
+        els.diskRow,
+        els.diskFill,
+        els.diskText,
+        percent,
+        formatSize(used) + " used · " + formatSize(free) + " free of " + formatSize(disk.totalBytes)
+      );
+    } else {
+      els.diskRow.hidden = true;
     }
 
-    renderHost(info && info.host);
+    const host = info && info.host;
+    const memTotal = host && host.memoryTotalBytes;
+    if (memTotal) {
+      const memFree = host.memoryAvailableBytes || 0;
+      const memUsed = Math.max(0, memTotal - memFree);
+      setMeter(
+        els.memRow,
+        els.memFill,
+        els.memText,
+        (memUsed / memTotal) * 100,
+        formatSize(memUsed) + " used · " + formatSize(memFree) + " free of " + formatSize(memTotal)
+      );
+    } else {
+      els.memRow.hidden = true;
+    }
+
+    renderHost(host);
     els.footer.hidden = false;
+  }
+
+  function setMeter(row, fill, text, percent, label) {
+    const clamped = Math.max(0, Math.min(100, percent));
+    fill.style.width = clamped + "%";
+    fill.classList.toggle("warn", clamped >= 90);
+    text.textContent = label;
+    row.hidden = false;
   }
 
   function formatDuration(seconds) {
@@ -332,10 +364,6 @@
           " " +
           hostInfo.load15.toFixed(2)
       );
-    }
-    if (hostInfo.memoryTotalBytes) {
-      const usedMem = hostInfo.memoryTotalBytes - (hostInfo.memoryAvailableBytes || 0);
-      parts.push("RAM " + formatSize(usedMem) + " / " + formatSize(hostInfo.memoryTotalBytes));
     }
     if (hostInfo.numCpu) parts.push(hostInfo.numCpu + " CPU");
     els.hostInfo.textContent = parts.join(" · ");

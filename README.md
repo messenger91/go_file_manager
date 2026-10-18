@@ -15,7 +15,7 @@ previewing, and deleting files under a single root folder.
 - Preview text files in the browser, download any file
 - Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
 - HTTP Basic auth (default `admin` / `admin`)
-- Footer with disk usage and host info (hostname, OS, uptime, load average, memory)
+- Footer with disk and RAM usage meters plus host info (hostname, OS, uptime, load average)
 - Light and dark theme (remembered per browser)
 - Access confined to `HOME_DIR`; traversal is clamped into the root and symlink escapes are rejected
 
