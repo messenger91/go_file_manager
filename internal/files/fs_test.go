@@ -215,3 +215,98 @@ func TestMkdirStaysWithinRoot(t *testing.T) {
 		t.Fatalf("expected clamped directory inside root: %v", err)
 	}
 }
+
+func TestRenameFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "old.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Rename("/old.txt", "new.txt"); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "old.txt")); !os.IsNotExist(err) {
+		t.Fatalf("old name still exists: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "new.txt")); err != nil {
+		t.Fatalf("new name missing: %v", err)
+	}
+}
+
+func TestRenameDirectory(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Rename("/sub", "renamed"); err != nil {
+		t.Fatalf("rename dir: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(root, "renamed")); err != nil || !info.IsDir() {
+		t.Fatalf("renamed directory missing: %v", err)
+	}
+}
+
+func TestRenameToExistingFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "b.txt"), []byte("b"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Rename("/a.txt", "b.txt"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("rename onto existing error = %v, want os.ErrExist", err)
+	}
+	// The original file must be untouched.
+	if data, _ := os.ReadFile(filepath.Join(root, "a.txt")); string(data) != "a" {
+		t.Fatalf("source changed despite failed rename")
+	}
+}
+
+func TestRenameInvalidName(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	for _, name := range []string{"", ".", "..", "sub/b", "../b"} {
+		if err := f.Rename("/a.txt", name); !errors.Is(err, ErrInvalidName) {
+			t.Errorf("Rename to %q error = %v, want ErrInvalidName", name, err)
+		}
+	}
+}
+
+func TestRenameRootRejected(t *testing.T) {
+	f := New(t.TempDir())
+	if err := f.Rename("/", "x"); !errors.Is(err, ErrRootOperation) {
+		t.Fatalf("rename root error = %v, want ErrRootOperation", err)
+	}
+}
+
+func TestRenameMissing(t *testing.T) {
+	f := New(t.TempDir())
+	if err := f.Rename("/nope.txt", "x.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("rename missing error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestRenameSameNameNoop(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Rename("/a.txt", "a.txt"); err != nil {
+		t.Fatalf("rename to same name: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a.txt")); err != nil {
+		t.Fatalf("file missing after no-op rename: %v", err)
+	}
+}

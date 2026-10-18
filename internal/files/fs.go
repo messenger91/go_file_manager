@@ -19,6 +19,8 @@ var (
 	ErrRootOperation = errors.New("operation is not allowed on the root directory")
 	// ErrDirNotEmpty is returned for a non-recursive delete of a non-empty directory.
 	ErrDirNotEmpty = errors.New("directory is not empty")
+	// ErrInvalidName is returned when a new name is empty or contains path separators.
+	ErrInvalidName = errors.New("invalid name")
 )
 
 // MaxReadSize is the largest file the API will return as a text preview.
@@ -210,6 +212,28 @@ func (f *FS) Mkdir(rel string) error {
 		return err
 	}
 	return os.Mkdir(full, 0o755)
+}
+
+// Rename changes the base name of the entry at rel to newName, keeping it in the
+// same directory. newName must be a plain name with no path separators. Renaming
+// onto an existing path fails with os.ErrExist rather than overwriting it.
+func (f *FS) Rename(rel, newName string) error {
+	if newName == "" || newName == "." || newName == ".." ||
+		strings.ContainsRune(newName, '/') || strings.ContainsRune(newName, os.PathSeparator) {
+		return ErrInvalidName
+	}
+	oldFull, err := f.resolveTarget(rel)
+	if err != nil {
+		return err
+	}
+	newFull := filepath.Join(filepath.Dir(oldFull), newName)
+	if newFull == oldFull {
+		return nil // nothing to do
+	}
+	if _, err := os.Lstat(newFull); err == nil {
+		return os.ErrExist
+	}
+	return os.Rename(oldFull, newFull)
 }
 
 // Delete removes a file or directory. Directories are removed non-recursively

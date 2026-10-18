@@ -38,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/download", s.handleDownload)
 	mux.HandleFunc("DELETE /api/delete", s.handleDelete)
 	mux.HandleFunc("POST /api/mkdir", s.handleMkdir)
+	mux.HandleFunc("POST /api/rename", s.handleRename)
 	mux.Handle("/", http.FileServer(http.FS(s.web)))
 
 	return s.withLogging(s.withAuth(mux))
@@ -159,6 +160,17 @@ func (s *Server) handleMkdir(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"created": rel})
 }
 
+func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	rel := query.Get("path")
+	name := query.Get("name")
+	if err := s.fm.Rename(rel, name); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": rel, "name": name})
+}
+
 func (s *Server) writeError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	switch {
@@ -166,7 +178,7 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		status = http.StatusForbidden
 	case errors.Is(err, os.ErrNotExist):
 		status = http.StatusNotFound
-	case errors.Is(err, files.ErrRootOperation):
+	case errors.Is(err, files.ErrRootOperation), errors.Is(err, files.ErrInvalidName):
 		status = http.StatusBadRequest
 	case errors.Is(err, files.ErrDirNotEmpty), errors.Is(err, os.ErrExist):
 		status = http.StatusConflict

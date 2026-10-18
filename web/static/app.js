@@ -12,6 +12,7 @@
     viewerDownload: document.getElementById("viewer-download"),
     viewerClose: document.getElementById("viewer-close"),
     viewerDelete: document.getElementById("viewer-delete"),
+    viewerRename: document.getElementById("viewer-rename"),
     contextMenu: document.getElementById("context-menu"),
     confirmModal: document.getElementById("confirm-modal"),
     confirmTitle: document.getElementById("confirm-title"),
@@ -138,6 +139,13 @@
 
   function apiMkdir(path) {
     return sendJSON("POST", "/api/mkdir?path=" + encodeURIComponent(path));
+  }
+
+  function apiRename(path, name) {
+    return sendJSON(
+      "POST",
+      "/api/rename?path=" + encodeURIComponent(path) + "&name=" + encodeURIComponent(name)
+    );
   }
 
   const ICONS = {
@@ -498,6 +506,10 @@
     });
   }
 
+  function invalidSegment(name) {
+    return name === "." || name === ".." || name.indexOf("/") !== -1;
+  }
+
   async function createFolder() {
     const name = await promptDialog({ title: "New folder", value: "", confirmLabel: "Create" });
     if (name === null) return; // cancelled
@@ -505,7 +517,7 @@
       setStatus("Folder name cannot be empty.", true);
       return;
     }
-    if (name === "." || name === ".." || name.indexOf("/") !== -1) {
+    if (invalidSegment(name)) {
       setStatus('Invalid folder name "' + name + '".', true);
       return;
     }
@@ -517,6 +529,29 @@
       setStatus('Created folder "' + name + '".', false);
     } catch (err) {
       setStatus("Failed to create folder: " + err.message, true);
+    }
+  }
+
+  async function renameEntry(entry) {
+    const name = await promptDialog({ title: "Rename", value: entry.name, confirmLabel: "Rename" });
+    if (name === null) return; // cancelled
+    if (name === entry.name) return; // unchanged
+    if (name === "") {
+      setStatus("Name cannot be empty.", true);
+      return;
+    }
+    if (invalidSegment(name)) {
+      setStatus('Invalid name "' + name + '".', true);
+      return;
+    }
+
+    try {
+      await apiRename(entry.path, name);
+      closeViewer();
+      await navigate(currentPath);
+      setStatus('Renamed "' + entry.name + '" to "' + name + '".', false);
+    } catch (err) {
+      setStatus("Failed to rename: " + err.message, true);
     }
   }
 
@@ -600,10 +635,12 @@
     const items = entry.isDir
       ? [
           { label: "Open", action: function () { navigate(entry.path); } },
+          { label: "Rename", action: function () { renameEntry(entry); } },
           { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
         ]
       : [
           { label: "Preview", action: function () { openFile(entry); } },
+          { label: "Rename", action: function () { renameEntry(entry); } },
           { label: "Download", action: function () { downloadEntry(entry); } },
           { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
         ];
@@ -636,6 +673,10 @@
 
   els.viewerDelete.addEventListener("click", function () {
     if (openEntry) deleteEntry(openEntry);
+  });
+
+  els.viewerRename.addEventListener("click", function () {
+    if (openEntry) renameEntry(openEntry);
   });
 
   els.viewerClose.addEventListener("click", closeViewer);

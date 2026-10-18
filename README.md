@@ -8,6 +8,7 @@ previewing, and deleting files under a single root folder.
 
 - Browse directories and view file metadata
 - Create new folders from the right-click context menu
+- Rename files and folders (context menu, or the Rename button in the file viewer)
 - List and grid views, switchable from the top bar or the right-click context menu (remembered per browser)
 - Filter the current folder and sort by name, size, or modified date
 - Preview text files in the browser, download any file
@@ -53,6 +54,7 @@ All endpoints require Basic auth.
 | GET    | `/api/download` | Raw file download                    |
 | DELETE | `/api/delete`   | Delete a file or folder              |
 | POST   | `/api/mkdir`    | Create a folder                      |
+| POST   | `/api/rename`   | Rename a file or folder in place     |
 
 `DELETE /api/delete?path=/sub` removes an empty folder (or a file). Deleting a
 non-empty folder returns `409 Conflict` unless `&recursive=true` is passed. The
@@ -61,6 +63,10 @@ root folder itself can never be deleted.
 `POST /api/mkdir?path=/sub/new` creates a folder. The parent must exist; a
 missing parent returns `404` and an existing path returns `409`. The root itself
 cannot be created.
+
+`POST /api/rename?path=/sub/old.txt&name=new.txt` renames in place (same folder).
+`name` must be a plain name with no `/`. Renaming onto an existing path returns
+`409` rather than overwriting; a missing source returns `404`.
 
 ## Development
 
