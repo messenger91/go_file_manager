@@ -408,6 +408,24 @@ main {
   gap: 0.5rem;
 }
 
+.prompt-input {
+  width: 100%;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 1.25rem;
+}
+
+.prompt-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
 /* --- viewer --- */
 .viewer {
   position: fixed;

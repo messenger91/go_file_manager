@@ -15,8 +15,8 @@ import (
 var (
 	// ErrForbidden is returned when a requested path escapes the configured root.
 	ErrForbidden = errors.New("path is outside the configured root")
-	// ErrRootDelete is returned when a caller tries to delete the root itself.
-	ErrRootDelete = errors.New("cannot delete the root directory")
+	// ErrRootOperation is returned when an operation targets the root itself.
+	ErrRootOperation = errors.New("operation is not allowed on the root directory")
 	// ErrDirNotEmpty is returned for a non-recursive delete of a non-empty directory.
 	ErrDirNotEmpty = errors.New("directory is not empty")
 )
@@ -179,18 +179,18 @@ func (f *FS) Open(rel string) (*os.File, os.FileInfo, error) {
 	return file, info, nil
 }
 
-// resolveNoFollow resolves a path for destructive operations. Unlike resolve,
-// it does not follow the final path element, so deleting a symlink removes the
+// resolveTarget resolves a path for filesystem mutations. Unlike resolve, it
+// does not follow the final path element, so operating on a symlink affects the
 // link itself rather than its target. The parent directory is resolved and must
-// stay inside the root. Deleting the root is rejected.
-func (f *FS) resolveNoFollow(rel string) (string, error) {
+// stay inside the root. The root itself is rejected.
+func (f *FS) resolveTarget(rel string) (string, error) {
 	clean := path.Clean("/" + strings.TrimSpace(rel))
 	full := filepath.Join(f.root, filepath.FromSlash(clean))
 	if full != f.root && !strings.HasPrefix(full, f.root+string(os.PathSeparator)) {
 		return "", ErrForbidden
 	}
 	if full == f.root {
-		return "", ErrRootDelete
+		return "", ErrRootOperation
 	}
 	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(full))
 	if err != nil {
@@ -202,10 +202,20 @@ func (f *FS) resolveNoFollow(rel string) (string, error) {
 	return full, nil
 }
 
+// Mkdir creates a new directory at rel. Its parent must already exist and be
+// inside the root, and the directory must not already exist.
+func (f *FS) Mkdir(rel string) error {
+	full, err := f.resolveTarget(rel)
+	if err != nil {
+		return err
+	}
+	return os.Mkdir(full, 0o755)
+}
+
 // Delete removes a file or directory. Directories are removed non-recursively
 // unless recursive is true, in which case their entire contents are removed.
 func (f *FS) Delete(rel string, recursive bool) error {
-	full, err := f.resolveNoFollow(rel)
+	full, err := f.resolveTarget(rel)
 	if err != nil {
 		return err
 	}

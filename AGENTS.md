@@ -40,7 +40,7 @@ Always run `make fmt vet test` before finishing; all three currently pass.
 - `internal/config` — env/`.env` loading. Precedence: **process env > `.env` > defaults**.
   `.env` is read from the current working directory.
 - `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`,
-  `Delete`). This is the security boundary; test changes here.
+  `Delete`, `Mkdir`). This is the security boundary; test changes here.
 - `internal/server` — HTTP routes, Basic auth, JSON/error handling.
 - `web/` — static UI (`index.html`, `static/style.css`, `static/app.js`). **Assets are
   embedded at build time**, so edits require a rebuild/restart, not just a refresh.
@@ -54,9 +54,10 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   **clamped into the root** (yields 404 for nonexistent paths), not rejected; symlink
   escapes that resolve outside the root return 403. Keep both behaviors.
 - `/api/read` refuses files over `files.MaxReadSize` (2 MiB) so callers download instead.
-- Delete uses `resolveNoFollow` (not `resolve`): it resolves the parent but never the
-  final element, so deleting a symlink unlinks the link and leaves its target intact,
-  even when the target is outside the root. Deleting the root returns
-  `ErrRootDelete` (400). A non-empty directory without `recursive=true` returns
-  `ErrDirNotEmpty` (409).
-- Still no mkdir/rename/upload/move endpoints. Add them only against confirmed scope.
+- Delete and mkdir use `resolveTarget` (not `resolve`): it resolves the parent but
+  never the final element, so deleting a symlink unlinks the link and leaves its target
+  intact, even when the target is outside the root. Operating on the root returns
+  `ErrRootOperation` (400). A non-empty directory without `recursive=true` returns
+  `ErrDirNotEmpty` (409); `Mkdir` on an existing path returns `os.ErrExist` (409) and a
+  missing parent returns `os.ErrNotExist` (404).
+- No rename/upload/move endpoints yet. Add them only against confirmed scope.

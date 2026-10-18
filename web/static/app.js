@@ -18,6 +18,11 @@
     confirmMessage: document.getElementById("confirm-message"),
     confirmOk: document.getElementById("confirm-ok"),
     confirmCancel: document.getElementById("confirm-cancel"),
+    promptModal: document.getElementById("prompt-modal"),
+    promptTitle: document.getElementById("prompt-title"),
+    promptInput: document.getElementById("prompt-input"),
+    promptOk: document.getElementById("prompt-ok"),
+    promptCancel: document.getElementById("prompt-cancel"),
     filter: document.getElementById("filter"),
     itemCount: document.getElementById("item-count"),
     viewToggle: document.getElementById("view-toggle"),
@@ -110,10 +115,8 @@
     return res.json();
   }
 
-  async function apiDelete(path, recursive) {
-    const url =
-      "/api/delete?path=" + encodeURIComponent(path) + (recursive ? "&recursive=true" : "");
-    const res = await fetch(url, { method: "DELETE", headers: { Accept: "application/json" } });
+  async function sendJSON(method, url) {
+    const res = await fetch(url, { method: method, headers: { Accept: "application/json" } });
     if (!res.ok) {
       let message = res.status + " " + res.statusText;
       try {
@@ -125,6 +128,16 @@
       throw new Error(message);
     }
     return res.json();
+  }
+
+  function apiDelete(path, recursive) {
+    const url =
+      "/api/delete?path=" + encodeURIComponent(path) + (recursive ? "&recursive=true" : "");
+    return sendJSON("DELETE", url);
+  }
+
+  function apiMkdir(path) {
+    return sendJSON("POST", "/api/mkdir?path=" + encodeURIComponent(path));
   }
 
   const ICONS = {
@@ -439,6 +452,74 @@
     });
   }
 
+  // --- text prompt dialog (replaces window.prompt) ---
+  function promptDialog(opts) {
+    return new Promise(function (resolve) {
+      els.promptTitle.textContent = opts.title;
+      els.promptOk.textContent = opts.confirmLabel || "Create";
+      els.promptInput.value = opts.value || "";
+      els.promptModal.hidden = false;
+      els.promptInput.focus();
+      els.promptInput.select();
+
+      function finish(result) {
+        els.promptModal.hidden = true;
+        els.promptOk.removeEventListener("click", onOk);
+        els.promptCancel.removeEventListener("click", onCancel);
+        els.promptModal.removeEventListener("click", onBackdrop);
+        els.promptInput.removeEventListener("keydown", onKey);
+        document.removeEventListener("keydown", onEsc);
+        resolve(result);
+      }
+      function onOk() {
+        finish(els.promptInput.value.trim());
+      }
+      function onCancel() {
+        finish(null);
+      }
+      function onBackdrop(e) {
+        if (e.target === els.promptModal) finish(null);
+      }
+      function onKey(e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          onOk();
+        }
+      }
+      function onEsc(e) {
+        if (e.key === "Escape") finish(null);
+      }
+
+      els.promptOk.addEventListener("click", onOk);
+      els.promptCancel.addEventListener("click", onCancel);
+      els.promptModal.addEventListener("click", onBackdrop);
+      els.promptInput.addEventListener("keydown", onKey);
+      document.addEventListener("keydown", onEsc);
+    });
+  }
+
+  async function createFolder() {
+    const name = await promptDialog({ title: "New folder", value: "", confirmLabel: "Create" });
+    if (name === null) return; // cancelled
+    if (name === "") {
+      setStatus("Folder name cannot be empty.", true);
+      return;
+    }
+    if (name === "." || name === ".." || name.indexOf("/") !== -1) {
+      setStatus('Invalid folder name "' + name + '".', true);
+      return;
+    }
+
+    const base = currentPath === "/" ? "" : currentPath;
+    try {
+      await apiMkdir(base + "/" + name);
+      await navigate(currentPath);
+      setStatus('Created folder "' + name + '".', false);
+    } catch (err) {
+      setStatus("Failed to create folder: " + err.message, true);
+    }
+  }
+
   async function deleteEntry(entry) {
     const kind = entry.isDir ? "folder" : "file";
     const extra = entry.isDir ? " and everything inside it" : "";
@@ -481,6 +562,12 @@
     ];
   }
 
+  function globalMenuItems() {
+    return [{ label: "New folder", action: function () { createFolder(); } }, { separator: true }].concat(
+      viewMenuItems()
+    );
+  }
+
   function buildMenu(x, y, items) {
     els.contextMenu.textContent = "";
     items.forEach(function (item) {
@@ -521,12 +608,12 @@
           { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
         ];
     items.push({ separator: true });
-    items.push.apply(items, viewMenuItems());
+    items.push.apply(items, globalMenuItems());
     buildMenu(x, y, items);
   }
 
   function showViewMenu(x, y) {
-    buildMenu(x, y, viewMenuItems());
+    buildMenu(x, y, globalMenuItems());
   }
 
   document.addEventListener("click", hideContextMenu);

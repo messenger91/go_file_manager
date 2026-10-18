@@ -80,8 +80,8 @@ func TestReadFileRejectsLargeFile(t *testing.T) {
 func TestDeleteRootRejected(t *testing.T) {
 	f := New(t.TempDir())
 	for _, p := range []string{"/", "", "/.", "/sub/.."} {
-		if err := f.Delete(p, true); !errors.Is(err, ErrRootDelete) {
-			t.Errorf("Delete(%q) error = %v, want ErrRootDelete", p, err)
+		if err := f.Delete(p, true); !errors.Is(err, ErrRootOperation) {
+			t.Errorf("Delete(%q) error = %v, want ErrRootOperation", p, err)
 		}
 	}
 }
@@ -146,5 +146,72 @@ func TestDeleteSymlinkRemovesLinkOnly(t *testing.T) {
 	}
 	if _, err := os.Stat(target); err != nil {
 		t.Fatalf("symlink target was removed: %v", err)
+	}
+}
+
+func TestMkdirCreatesDirectory(t *testing.T) {
+	root := t.TempDir()
+	f := New(root)
+
+	if err := f.Mkdir("/new"); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(root, "new")); err != nil || !info.IsDir() {
+		t.Fatalf("directory not created: %v", err)
+	}
+}
+
+func TestMkdirNested(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Mkdir("/sub/inner"); err != nil {
+		t.Fatalf("mkdir nested: %v", err)
+	}
+	if info, err := os.Stat(filepath.Join(root, "sub", "inner")); err != nil || !info.IsDir() {
+		t.Fatalf("nested directory not created: %v", err)
+	}
+}
+
+func TestMkdirExistingFails(t *testing.T) {
+	root := t.TempDir()
+	f := New(root)
+	if err := f.Mkdir("/dup"); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Mkdir("/dup"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("second mkdir error = %v, want os.ErrExist", err)
+	}
+}
+
+func TestMkdirMissingParentFails(t *testing.T) {
+	f := New(t.TempDir())
+	if err := f.Mkdir("/missing/child"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("mkdir with missing parent error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestMkdirRootRejected(t *testing.T) {
+	f := New(t.TempDir())
+	for _, p := range []string{"/", "", "/sub/.."} {
+		if err := f.Mkdir(p); !errors.Is(err, ErrRootOperation) {
+			t.Errorf("Mkdir(%q) error = %v, want ErrRootOperation", p, err)
+		}
+	}
+}
+
+// Traversal in a create path is clamped into the root, never escaping it.
+func TestMkdirStaysWithinRoot(t *testing.T) {
+	root := t.TempDir()
+	f := New(root)
+
+	if err := f.Mkdir("/../evil"); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "evil")); err != nil {
+		t.Fatalf("expected clamped directory inside root: %v", err)
 	}
 }
