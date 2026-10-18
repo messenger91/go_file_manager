@@ -55,7 +55,9 @@ Always run `make fmt vet test` before finishing; all three currently pass.
 ## Gotchas
 
 - `HOME_DIR` is required; the server exits if it is unset. `ADMIN`/`PASSWORD` default to
-  `admin`/`admin`; `PORT` defaults to `8080`.
+  `admin`/`admin`; `PORT` defaults to `8080`. `PORT` is a **port only** — the listener is
+  always `:PORT` (all interfaces); there is no host/bind setting, so restrict access with
+  a firewall or reverse proxy. `README.md` has a systemd + nginx deployment guide.
 - Auth is a **login form with an in-memory session cookie** (`gfm_session`, 24h TTL), not
   a browser Basic-auth prompt: the server never sends `WWW-Authenticate`, so the native
   dialog can't appear. Unauthenticated `/api/*` calls get `401` JSON; page requests
