@@ -43,6 +43,9 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   `Delete`, `Mkdir`, `Rename`, `Create`, `Write`, `Upload`, `Disk`). This is the security
   boundary; test changes here.
 - `internal/server` — HTTP routes, Basic auth, JSON/error handling.
+- `internal/host` — host info for `GET /api/info` (hostname, OS name, arch, uptime, load
+  average, memory). Read from `/proc` and `/etc/os-release`; unavailable values are left
+  zero, so it compiles and runs on any OS.
 - `web/` — static UI (`index.html`, `static/style.css`, `static/app.js`). **Assets are
   embedded at build time**, so edits require a rebuild/restart, not just a refresh.
 

@@ -34,6 +34,7 @@
     footer: document.getElementById("footer"),
     diskFill: document.getElementById("disk-fill"),
     diskText: document.getElementById("disk-text"),
+    hostInfo: document.getElementById("host-info"),
     viewToggle: document.getElementById("view-toggle"),
     listing: document.querySelector(".listing"),
     grid: document.getElementById("grid"),
@@ -284,21 +285,60 @@
     } catch (_) {
       return; // server info is best-effort; ignore failures
     }
+
     const disk = info && info.disk;
-    if (!disk || !disk.totalBytes) return;
+    if (disk && disk.totalBytes) {
+      const total = disk.totalBytes;
+      const free = disk.freeBytes || 0;
+      const used = disk.usedBytes || 0;
+      // Match `df`: the reserved blocks are excluded from both used and free.
+      const denom = used + free;
+      const percent = denom > 0 ? Math.min(100, Math.round((used / denom) * 100)) : 0;
+      els.diskFill.style.width = percent + "%";
+      els.diskFill.classList.toggle("warn", percent >= 90);
+      els.diskText.textContent =
+        formatSize(used) + " used · " + formatSize(free) + " free of " + formatSize(total);
+    }
 
-    const total = disk.totalBytes;
-    const free = disk.freeBytes || 0;
-    const used = disk.usedBytes || 0;
-    // Match `df`: the reserved blocks are excluded from both used and free.
-    const denom = used + free;
-    const percent = denom > 0 ? Math.min(100, Math.round((used / denom) * 100)) : 0;
-
-    els.diskFill.style.width = percent + "%";
-    els.diskFill.classList.toggle("warn", percent >= 90);
-    els.diskText.textContent =
-      formatSize(used) + " used · " + formatSize(free) + " free of " + formatSize(total);
+    renderHost(info && info.host);
     els.footer.hidden = false;
+  }
+
+  function formatDuration(seconds) {
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (days > 0) return days + "d " + hours + "h";
+    if (hours > 0) return hours + "h " + minutes + "m";
+    return minutes + "m";
+  }
+
+  function renderHost(hostInfo) {
+    if (!hostInfo) {
+      els.hostInfo.textContent = "";
+      return;
+    }
+    const parts = [];
+    if (hostInfo.hostname) parts.push(hostInfo.hostname);
+    const os = hostInfo.osName || hostInfo.os;
+    if (os) parts.push(os + (hostInfo.arch ? " (" + hostInfo.arch + ")" : ""));
+    if (hostInfo.uptimeSeconds) parts.push("up " + formatDuration(hostInfo.uptimeSeconds));
+    if (hostInfo.load1 || hostInfo.load5 || hostInfo.load15) {
+      parts.push(
+        "load " +
+          hostInfo.load1.toFixed(2) +
+          " " +
+          hostInfo.load5.toFixed(2) +
+          " " +
+          hostInfo.load15.toFixed(2)
+      );
+    }
+    if (hostInfo.memoryTotalBytes) {
+      const usedMem = hostInfo.memoryTotalBytes - (hostInfo.memoryAvailableBytes || 0);
+      parts.push("RAM " + formatSize(usedMem) + " / " + formatSize(hostInfo.memoryTotalBytes));
+    }
+    if (hostInfo.numCpu) parts.push(hostInfo.numCpu + " CPU");
+    els.hostInfo.textContent = parts.join(" · ");
   }
 
   function emptyText() {

@@ -657,6 +657,17 @@ body[data-view="list"] .grid {
   white-space: nowrap;
 }
 
+.host {
+  margin-top: 0.5rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.host:empty {
+  display: none;
+}
+
 @media (hover: none) {
   .card-delete {
     opacity: 1;

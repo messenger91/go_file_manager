@@ -16,6 +16,7 @@ import (
 
 	"go_file_manager/internal/config"
 	"go_file_manager/internal/files"
+	"go_file_manager/internal/host"
 )
 
 // Server serves the read-only file manager API and web UI.
@@ -156,6 +157,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"root": s.fm.Root(),
 		"disk": disk,
+		"host": host.Collect(),
 	})
 }
 
