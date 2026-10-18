@@ -22,6 +22,7 @@
       <span>Go File Manager</span>
     </div>
     <nav class="breadcrumbs" id="breadcrumbs" aria-label="Breadcrumb"></nav>
+    <button id="info-toggle" class="btn icon-btn" type="button" aria-label="Server info" title="Server info">ℹ️</button>
     <button id="view-toggle" class="btn icon-btn" type="button" aria-label="Toggle grid view" title="Toggle list/grid view">▦</button>
     <button id="theme-toggle" class="btn icon-btn" type="button" aria-label="Toggle theme" title="Toggle light/dark theme">🌙</button>
   </header>
@@ -51,19 +52,6 @@
       <tbody id="listing-body"></tbody>
     </table>
     <div class="grid" id="grid" hidden></div>
-    <footer class="footer" id="footer" hidden>
-      <div class="usage" id="disk-row">
-        <span class="usage-label">Disk</span>
-        <div class="usage-bar"><div class="usage-bar-fill" id="disk-fill"></div></div>
-        <span class="usage-text" id="disk-text" aria-live="polite"></span>
-      </div>
-      <div class="usage" id="mem-row" hidden>
-        <span class="usage-label">RAM</span>
-        <div class="usage-bar"><div class="usage-bar-fill" id="mem-fill"></div></div>
-        <span class="usage-text" id="mem-text" aria-live="polite"></span>
-      </div>
-      <div class="host" id="host-info"></div>
-    </footer>
   </main>
 
   <div class="viewer" id="viewer" hidden>
@@ -111,6 +99,31 @@
       <div class="modal-actions">
         <button id="prompt-cancel" class="btn" type="button">Cancel</button>
         <button id="prompt-ok" class="btn" type="button">Create</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="info-modal" hidden>
+    <div
+      class="modal-panel info-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="info-title"
+    >
+      <h2 class="modal-title" id="info-title">Server info</h2>
+      <div class="usage" id="disk-row">
+        <span class="usage-label">Disk</span>
+        <div class="usage-bar"><div class="usage-bar-fill" id="disk-fill"></div></div>
+        <span class="usage-text" id="disk-text" aria-live="polite"></span>
+      </div>
+      <div class="usage" id="mem-row" hidden>
+        <span class="usage-label">RAM</span>
+        <div class="usage-bar"><div class="usage-bar-fill" id="mem-fill"></div></div>
+        <span class="usage-text" id="mem-text" aria-live="polite"></span>
+      </div>
+      <dl class="info-list" id="info-list"></dl>
+      <div class="modal-actions">
+        <button id="info-close" class="btn" type="button">Close</button>
       </div>
     </div>
   </div>

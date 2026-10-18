@@ -31,14 +31,16 @@
     promptCancel: document.getElementById("prompt-cancel"),
     filter: document.getElementById("filter"),
     itemCount: document.getElementById("item-count"),
-    footer: document.getElementById("footer"),
+    infoToggle: document.getElementById("info-toggle"),
+    infoModal: document.getElementById("info-modal"),
+    infoClose: document.getElementById("info-close"),
+    infoList: document.getElementById("info-list"),
     diskRow: document.getElementById("disk-row"),
     diskFill: document.getElementById("disk-fill"),
     diskText: document.getElementById("disk-text"),
     memRow: document.getElementById("mem-row"),
     memFill: document.getElementById("mem-fill"),
     memText: document.getElementById("mem-text"),
-    hostInfo: document.getElementById("host-info"),
     viewToggle: document.getElementById("view-toggle"),
     listing: document.querySelector(".listing"),
     grid: document.getElementById("grid"),
@@ -286,10 +288,17 @@
     let info;
     try {
       info = await sendJSON("GET", "/api/info");
-    } catch (_) {
-      return; // server info is best-effort; ignore failures
+    } catch (err) {
+      els.diskRow.hidden = true;
+      els.memRow.hidden = true;
+      els.infoList.textContent = "";
+      appendInfoRow("Error", err.message);
+      return;
     }
+    renderServerInfo(info);
+  }
 
+  function renderServerInfo(info) {
     const disk = info && info.disk;
     if (disk && disk.totalBytes) {
       const used = disk.usedBytes || 0;
@@ -324,8 +333,37 @@
       els.memRow.hidden = true;
     }
 
-    renderHost(host);
-    els.footer.hidden = false;
+    renderInfoRows(host, info && info.root);
+  }
+
+  function renderInfoRows(host, root) {
+    els.infoList.textContent = "";
+    if (root) appendInfoRow("Root", root);
+    if (host) {
+      if (host.hostname) appendInfoRow("Hostname", host.hostname);
+      const os = host.osName || host.os;
+      if (os) {
+        const platform = [host.os, host.arch].filter(Boolean).join("/");
+        appendInfoRow("OS", os + (platform ? " (" + platform + ")" : ""));
+      }
+      if (host.numCpu) appendInfoRow("CPU", host.numCpu + " cores");
+      if (host.uptimeSeconds) appendInfoRow("Uptime", formatDuration(host.uptimeSeconds));
+      if (host.load1 || host.load5 || host.load15) {
+        appendInfoRow(
+          "Load average",
+          host.load1.toFixed(2) + " · " + host.load5.toFixed(2) + " · " + host.load15.toFixed(2)
+        );
+      }
+      if (host.goVersion) appendInfoRow("Go", host.goVersion);
+    }
+  }
+
+  function appendInfoRow(label, value) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    els.infoList.append(dt, dd);
   }
 
   function setMeter(row, fill, text, percent, label) {
@@ -345,28 +383,15 @@
     return minutes + "m";
   }
 
-  function renderHost(hostInfo) {
-    if (!hostInfo) {
-      els.hostInfo.textContent = "";
-      return;
-    }
-    const parts = [];
-    if (hostInfo.hostname) parts.push(hostInfo.hostname);
-    const os = hostInfo.osName || hostInfo.os;
-    if (os) parts.push(os + (hostInfo.arch ? " (" + hostInfo.arch + ")" : ""));
-    if (hostInfo.uptimeSeconds) parts.push("up " + formatDuration(hostInfo.uptimeSeconds));
-    if (hostInfo.load1 || hostInfo.load5 || hostInfo.load15) {
-      parts.push(
-        "load " +
-          hostInfo.load1.toFixed(2) +
-          " " +
-          hostInfo.load5.toFixed(2) +
-          " " +
-          hostInfo.load15.toFixed(2)
-      );
-    }
-    if (hostInfo.numCpu) parts.push(hostInfo.numCpu + " CPU");
-    els.hostInfo.textContent = parts.join(" · ");
+  // --- server info popup ---
+  function openInfo() {
+    els.infoModal.hidden = false;
+    els.infoClose.focus();
+    loadServerInfo(); // refresh every time it is opened
+  }
+
+  function closeInfo() {
+    els.infoModal.hidden = true;
   }
 
   function emptyText() {
@@ -519,7 +544,6 @@
       currentPath = data.path;
       renderBreadcrumbs(data.path);
       renderEntries(data.entries);
-      loadServerInfo();
     } catch (err) {
       setStatus("Failed to load " + path + ": " + err.message, true);
       renderEntries([]);
@@ -919,12 +943,20 @@
     uploadFiles(els.fileInput.files);
   });
 
+  els.infoToggle.addEventListener("click", openInfo);
+  els.infoClose.addEventListener("click", closeInfo);
+  els.infoModal.addEventListener("click", function (e) {
+    if (e.target === els.infoModal) closeInfo();
+  });
+
   els.viewerClose.addEventListener("click", closeViewer);
   els.viewer.addEventListener("click", function (e) {
     if (e.target === els.viewer && !editing) closeViewer();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && !els.viewer.hidden) {
+    if (e.key === "Escape" && !els.infoModal.hidden) {
+      closeInfo();
+    } else if (e.key === "Escape" && !els.viewer.hidden) {
       if (editing) cancelEdit();
       else closeViewer();
     } else if ((e.ctrlKey || e.metaKey) && e.key === "s" && editing) {

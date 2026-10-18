@@ -607,33 +607,18 @@ body[data-view="list"] .grid {
   padding: 2rem;
 }
 
-/* --- footer / resource usage --- */
-.footer {
-  margin-top: 1rem;
-  padding: 0.6rem 0.9rem;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-}
-
-.footer[hidden] {
-  display: none;
-}
-
+/* --- server info popup --- */
 .usage {
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  margin-bottom: 0.5rem;
   font-size: 0.8rem;
   color: var(--muted);
 }
 
 .usage[hidden] {
   display: none;
-}
-
-.usage + .usage {
-  margin-top: 0.4rem;
 }
 
 .usage-label {
@@ -667,15 +652,36 @@ body[data-view="list"] .grid {
   white-space: nowrap;
 }
 
-.host {
-  margin-top: 0.5rem;
-  font-size: 0.78rem;
+.info-panel {
+  width: min(520px, 100%);
+}
+
+.info-list {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.35rem 1rem;
+  margin: 1rem 0 1.25rem;
+  font-size: 0.85rem;
+}
+
+.info-list dt {
   color: var(--muted);
+  white-space: nowrap;
+}
+
+.info-list dd {
+  margin: 0;
   word-break: break-word;
 }
 
-.host:empty {
-  display: none;
+@media (max-width: 520px) {
+  .usage {
+    flex-wrap: wrap;
+  }
+
+  .usage-text {
+    white-space: normal;
+  }
 }
 
 @media (hover: none) {
