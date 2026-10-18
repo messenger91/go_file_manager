@@ -54,6 +54,25 @@
     </div>
   </div>
 
+  <div class="context-menu" id="context-menu" role="menu" hidden></div>
+
+  <div class="modal" id="confirm-modal" hidden>
+    <div
+      class="modal-panel"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="confirm-title"
+      aria-describedby="confirm-message"
+    >
+      <h2 class="modal-title" id="confirm-title"></h2>
+      <p class="modal-message" id="confirm-message"></p>
+      <div class="modal-actions">
+        <button id="confirm-cancel" class="btn" type="button">Cancel</button>
+        <button id="confirm-ok" class="btn danger" type="button">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/app.js"></script>
 </body>
 </html>

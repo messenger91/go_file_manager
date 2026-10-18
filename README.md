@@ -8,7 +8,7 @@ previewing, and deleting files under a single root folder.
 
 - Browse directories and view file metadata
 - Preview text files in the browser, download any file
-- Delete files and folders (recursive, with an in-browser confirmation)
+- Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
 - HTTP Basic auth (default `admin` / `admin`)
 - Light and dark theme (remembered per browser)
 - Access confined to `HOME_DIR`; traversal is clamped into the root and symlink escapes are rejected
