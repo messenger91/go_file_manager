@@ -162,6 +162,38 @@ main {
   border-color: var(--danger);
 }
 
+/* --- toolbar --- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.filter-input {
+  flex: 1;
+  max-width: 320px;
+  font: inherit;
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.7rem;
+}
+
+.filter-input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+
+.item-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .listing {
   width: 100%;
   border-collapse: collapse;
@@ -186,6 +218,33 @@ main {
   font-size: 0.72rem;
   letter-spacing: 0.04em;
   background: var(--surface-2);
+}
+
+.listing .sort {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-transform: inherit;
+  letter-spacing: inherit;
+}
+
+.listing .sort:hover {
+  color: var(--text);
+}
+
+.listing .sort.active {
+  color: var(--accent);
+}
+
+.sort-arrow {
+  font-size: 0.7em;
+  line-height: 1;
 }
 
 .listing tbody tr:last-child td {

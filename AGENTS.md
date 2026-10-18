@@ -9,7 +9,12 @@ supported. No external dependencies — **stdlib only, on purpose**. There is no
 
 Requires **Go 1.25+** (the router uses method patterns like `"GET /api/list"`).
 
-Not yet a git repository.
+## Git
+
+GitHub repo `messenger91/go_file_manager`, default branch `main`, remote `origin`.
+`.env` and `bin/` are gitignored — commit `.env.example`, never `.env`. Pushing from
+a non-interactive sandbox fails with `could not read Username for
+'https://github.com'`; the user pushes from their own authenticated terminal.
 
 ## Commands
 
@@ -23,6 +28,9 @@ make fmt            # gofmt
 ```
 
 Single test: `go test ./internal/files -run TestResolveStaysWithinRoot`
+
+Tests live only in `internal/files` (covering root confinement, symlink escapes,
+listing order, and delete safety); `internal/config` and `internal/server` have none.
 
 Always run `make fmt vet test` before finishing; all three currently pass.
 

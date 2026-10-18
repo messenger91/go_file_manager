@@ -7,6 +7,7 @@ previewing, and deleting files under a single root folder.
 ## Features
 
 - Browse directories and view file metadata
+- Filter the current folder and sort by name, size, or modified date
 - Preview text files in the browser, download any file
 - Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
 - HTTP Basic auth (default `admin` / `admin`)

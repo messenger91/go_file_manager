@@ -18,10 +18,18 @@
     confirmMessage: document.getElementById("confirm-message"),
     confirmOk: document.getElementById("confirm-ok"),
     confirmCancel: document.getElementById("confirm-cancel"),
+    filter: document.getElementById("filter"),
+    itemCount: document.getElementById("item-count"),
   };
+
+  const sortButtons = Array.prototype.slice.call(document.querySelectorAll(".sort"));
 
   let currentPath = "/";
   let openEntry = null;
+  let currentEntries = [];
+  let filterText = "";
+  let sortKey = "name";
+  let sortDir = "asc";
 
   // --- theme ---
   function applyTheme(theme) {
@@ -145,14 +153,67 @@
   }
 
   function renderEntries(entries) {
+    currentEntries = entries || [];
+    renderList();
+  }
+
+  function visibleEntries() {
+    const query = filterText.trim().toLowerCase();
+    let list = currentEntries;
+    if (query) {
+      list = list.filter(function (e) {
+        return e.name.toLowerCase().indexOf(query) !== -1;
+      });
+    }
+    const direction = sortDir === "asc" ? 1 : -1;
+    return list.slice().sort(function (a, b) {
+      // Directories are always grouped first, regardless of sort key.
+      if (a.isDir !== b.isDir) return a.isDir ? -1 : 1;
+      let cmp;
+      if (sortKey === "size") {
+        cmp = a.size - b.size;
+      } else if (sortKey === "time") {
+        cmp = new Date(a.modTime) - new Date(b.modTime);
+      } else {
+        cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      }
+      if (cmp === 0) cmp = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      return cmp * direction;
+    });
+  }
+
+  function updateSortIndicators() {
+    sortButtons.forEach(function (button) {
+      const active = button.dataset.key === sortKey;
+      button.classList.toggle("active", active);
+      button.querySelector(".sort-arrow").textContent = active ? (sortDir === "asc" ? "▲" : "▼") : "";
+      button.parentElement.setAttribute("aria-sort", active ? (sortDir === "asc" ? "ascending" : "descending") : "none");
+    });
+  }
+
+  function updateCount(total, shown) {
+    if (total === 0) {
+      els.itemCount.textContent = "";
+      return;
+    }
+    els.itemCount.textContent =
+      shown === total
+        ? total + (total === 1 ? " item" : " items")
+        : shown + " of " + total + " items";
+  }
+
+  function renderList() {
+    updateSortIndicators();
+    const entries = visibleEntries();
+    updateCount(currentEntries.length, entries.length);
     els.body.textContent = "";
 
-    if (!entries || entries.length === 0) {
+    if (entries.length === 0) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
       td.colSpan = 4;
       td.className = "empty";
-      td.textContent = "This folder is empty.";
+      td.textContent = currentEntries.length === 0 ? "This folder is empty." : "No files match your filter.";
       tr.appendChild(td);
       els.body.appendChild(tr);
       return;
@@ -211,6 +272,10 @@
     closeViewer();
     try {
       const data = await api("/api/list", path);
+      if (data.path !== currentPath) {
+        filterText = "";
+        els.filter.value = "";
+      }
       currentPath = data.path;
       renderBreadcrumbs(data.path);
       renderEntries(data.entries);
@@ -365,6 +430,35 @@
   });
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") closeViewer();
+  });
+
+  // --- filter and sort ---
+  els.filter.addEventListener("input", function () {
+    filterText = els.filter.value;
+    renderList();
+  });
+
+  els.filter.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && els.filter.value !== "") {
+      els.filter.value = "";
+      filterText = "";
+      renderList();
+      e.stopPropagation();
+    }
+  });
+
+  sortButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      const key = button.dataset.key;
+      if (sortKey === key) {
+        sortDir = sortDir === "asc" ? "desc" : "asc";
+      } else {
+        sortKey = key;
+        // Size and Modified are most useful largest/newest first.
+        sortDir = key === "name" ? "asc" : "desc";
+      }
+      renderList();
+    });
   });
 
   navigate(currentPath);

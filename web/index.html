@@ -27,12 +27,23 @@
 
   <main>
     <div id="status" class="status" role="alert" hidden></div>
+    <div class="toolbar">
+      <input
+        id="filter"
+        class="filter-input"
+        type="search"
+        placeholder="Filter this folder…"
+        autocomplete="off"
+        aria-label="Filter files in this folder"
+      >
+      <span class="item-count" id="item-count" aria-live="polite"></span>
+    </div>
     <table class="listing">
       <thead>
         <tr>
-          <th>Name</th>
-          <th class="col-size">Size</th>
-          <th class="col-time">Modified</th>
+          <th><button type="button" class="sort" data-key="name">Name<span class="sort-arrow" aria-hidden="true"></span></button></th>
+          <th class="col-size"><button type="button" class="sort" data-key="size">Size<span class="sort-arrow" aria-hidden="true"></span></button></th>
+          <th class="col-time"><button type="button" class="sort" data-key="time">Modified<span class="sort-arrow" aria-hidden="true"></span></button></th>
           <th class="col-actions"><span class="visually-hidden">Actions</span></th>
         </tr>
       </thead>
