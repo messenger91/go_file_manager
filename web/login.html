@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Go File Manager</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%93%81%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/style.css">
+  <script>
+    // Apply the stored theme before first paint to avoid a flash.
+    (function () {
+      var stored = localStorage.getItem("theme");
+      var theme = stored || (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <style>
+    .login-main {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+
+    .login-card {
+      width: min(360px, 100%);
+      display: flex;
+      flex-direction: column;
+      padding: 1.75rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+    }
+
+    .login-logo {
+      font-size: 2rem;
+      text-align: center;
+    }
+
+    .login-title {
+      margin: 0.25rem 0 1.25rem;
+      font-size: 1.1rem;
+      text-align: center;
+    }
+
+    .login-card label {
+      margin-bottom: 0.25rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+
+    .login-card input {
+      margin-bottom: 0.85rem;
+      padding: 0.55rem 0.7rem;
+      font: inherit;
+      font-size: 0.9rem;
+      color: var(--text);
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+
+    .login-card input:focus {
+      outline: 2px solid var(--accent);
+      outline-offset: -1px;
+      border-color: var(--accent);
+    }
+
+    .login-card .btn {
+      margin-top: 0.35rem;
+      padding: 0.6rem;
+      font-size: 0.9rem;
+    }
+
+    .login-error {
+      margin: 0 0 0.85rem;
+      padding: 0.5rem 0.7rem;
+      font-size: 0.85rem;
+      color: var(--danger);
+      background: var(--danger-bg);
+      border: 1px solid var(--danger);
+      border-radius: 8px;
+    }
+
+    .login-error[hidden] {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="login-main">
+    <form class="login-card" method="post" action="/login">
+      <div class="login-logo" aria-hidden="true">📁</div>
+      <h1 class="login-title">Go File Manager</h1>
+      <p class="login-error" id="login-error" role="alert" hidden>Invalid username or password.</p>
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required autofocus>
+      <label for="password">Password</label>
+      <input id="password" name="password" type="password" autocomplete="current-password" required>
+      <input type="hidden" name="next" id="next-field" value="/">
+      <button class="btn" type="submit">Log in</button>
+    </form>
+  </main>
+
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      if (params.get("error")) {
+        document.getElementById("login-error").hidden = false;
+      }
+      var next = params.get("next") || "";
+      if (next.charAt(0) === "/" && next.charAt(1) !== "/") {
+        document.getElementById("next-field").value = next;
+      }
+    })();
+  </script>
+</body>
+</html>

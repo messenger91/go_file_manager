@@ -14,7 +14,8 @@ previewing, and deleting files under a single root folder.
 - Filter the current folder and sort by name, size, or modified date
 - Preview text files in the browser, download any file
 - Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
-- HTTP Basic auth (default `admin` / `admin`)
+- Login page with an in-memory session cookie (default `admin` / `admin`); HTTP Basic auth
+  still works for scripts and API clients
 - Server info popup from the header (disk/RAM usage meters + hostname, OS, uptime, load
   average, CPU, Go version)
 - Light and dark theme (remembered per browser)
@@ -41,13 +42,16 @@ Set via environment variables or a `.env` file (env vars win):
 | Variable   | Required | Default | Purpose                        |
 | ---------- | -------- | ------- | ------------------------------ |
 | `HOME_DIR` | yes      | —       | Root folder exposed by the app |
-| `ADMIN`    | no       | `admin` | Basic-auth username            |
-| `PASSWORD` | no       | `admin` | Basic-auth password            |
+| `ADMIN`    | no       | `admin` | Login username                 |
+| `PASSWORD` | no       | `admin` | Login password                 |
 | `PORT`     | no       | `8080`  | HTTP listen port               |
 
 ## HTTP API
 
-All endpoints require Basic auth.
+Every endpoint requires authentication. The web UI signs in through the `/login` form and
+carries a session cookie; scripts can authenticate with HTTP Basic (`curl -u admin:admin`).
+Unauthenticated `GET /api/*` requests return `401` with a JSON body, and page requests are
+redirected to `/login`. `POST /logout` ends the session.
 
 | Method | Path            | Description                          |
 | ------ | --------------- | ------------------------------------ |

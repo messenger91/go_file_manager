@@ -119,6 +119,11 @@ body {
   line-height: 1;
 }
 
+.logout-form {
+  margin: 0;
+  display: flex;
+}
+
 .btn.danger {
   color: var(--danger);
 }

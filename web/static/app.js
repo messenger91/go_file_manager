@@ -42,7 +42,6 @@
     memFill: document.getElementById("mem-fill"),
     memText: document.getElementById("mem-text"),
     viewToggle: document.getElementById("view-toggle"),
-    listing: document.querySelector(".listing"),
     grid: document.getElementById("grid"),
   };
 
@@ -116,10 +115,24 @@
     els.status.classList.toggle("error", !!isError);
   }
 
+  function redirectToLogin() {
+    const next = window.location.pathname + window.location.search;
+    window.location.href = "/login?next=" + encodeURIComponent(next);
+  }
+
+  // A 401 means the session expired: bounce to the login form.
+  function ensureAuthorized(res) {
+    if (res.status === 401) {
+      redirectToLogin();
+      throw new Error("Not signed in");
+    }
+  }
+
   async function api(endpoint, path) {
     const res = await fetch(endpoint + "?path=" + encodeURIComponent(path), {
       headers: { Accept: "application/json" },
     });
+    ensureAuthorized(res);
     if (!res.ok) {
       let message = res.status + " " + res.statusText;
       try {
@@ -135,6 +148,7 @@
 
   async function sendJSON(method, url) {
     const res = await fetch(url, { method: method, headers: { Accept: "application/json" } });
+    ensureAuthorized(res);
     if (!res.ok) {
       let message = res.status + " " + res.statusText;
       try {
@@ -175,6 +189,7 @@
       headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
       body: content,
     });
+    ensureAuthorized(res);
     if (!res.ok) {
       let message = res.status + " " + res.statusText;
       try {
@@ -456,13 +471,10 @@
       actionsCell.appendChild(deleteBtn);
 
       tr.append(nameCell, sizeCell, timeCell, actionsCell);
+      tr.dataset.path = entry.path;
       tr.addEventListener("click", function () {
         if (entry.isDir) navigate(entry.path);
         else openFile(entry);
-      });
-      tr.addEventListener("contextmenu", function (e) {
-        e.preventDefault();
-        showContextMenu(e.clientX, e.clientY, entry);
       });
       els.body.appendChild(tr);
     });
@@ -512,6 +524,7 @@
         card.appendChild(meta);
       }
       card.appendChild(deleteBtn);
+      card.dataset.path = entry.path;
 
       card.addEventListener("click", function () {
         if (entry.isDir) navigate(entry.path);
@@ -523,10 +536,6 @@
           if (entry.isDir) navigate(entry.path);
           else openFile(entry);
         }
-      });
-      card.addEventListener("contextmenu", function (e) {
-        e.preventDefault();
-        showContextMenu(e.clientX, e.clientY, entry);
       });
       els.grid.appendChild(card);
     });
@@ -784,6 +793,7 @@
         return {};
       });
       if (!res.ok) {
+        ensureAuthorized(res);
         throw new Error((data && data.error) || res.status + " " + res.statusText);
       }
 
@@ -856,7 +866,12 @@
       { label: "New file", action: function () { createFile(); } },
       { label: "Upload files…", action: function () { els.fileInput.click(); } },
       { separator: true },
-    ].concat(viewMenuItems());
+    ]
+      .concat(viewMenuItems())
+      .concat([
+        { separator: true },
+        { label: "Server info", action: function () { openInfo(); } },
+      ]);
   }
 
   function buildMenu(x, y, items) {
@@ -910,20 +925,23 @@
   }
 
   document.addEventListener("click", hideContextMenu);
+
+  // The app always shows its own context menu and suppresses the browser's,
+  // except inside text fields, where the native menu (copy/paste) is useful.
   document.addEventListener("contextmenu", function (e) {
-    // Right-click outside of the file area closes the menu and keeps the native menu.
-    if (!e.target.closest(".listing") && !e.target.closest(".grid")) hideContextMenu();
-  });
-  els.listing.addEventListener("contextmenu", function (e) {
-    if (e.target.closest("tr")) return;
+    if (e.target.closest("input, textarea, [contenteditable='true']")) return;
     e.preventDefault();
-    showViewMenu(e.clientX, e.clientY);
+
+    const target = e.target.closest("[data-path]");
+    const entry =
+      target &&
+      currentEntries.find(function (item) {
+        return item.path === target.dataset.path;
+      });
+    if (entry) showContextMenu(e.clientX, e.clientY, entry);
+    else showViewMenu(e.clientX, e.clientY);
   });
-  els.grid.addEventListener("contextmenu", function (e) {
-    if (e.target.closest(".card")) return;
-    e.preventDefault();
-    showViewMenu(e.clientX, e.clientY);
-  });
+
   window.addEventListener("scroll", hideContextMenu, true);
   window.addEventListener("resize", hideContextMenu);
 

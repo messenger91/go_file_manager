@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,47 +22,68 @@ import (
 
 // Server serves the read-only file manager API and web UI.
 type Server struct {
-	cfg    *config.Config
-	fm     *files.FS
-	web    fs.FS
-	logger *log.Logger
+	cfg      *config.Config
+	fm       *files.FS
+	web      fs.FS
+	logger   *log.Logger
+	sessions *sessionStore
 }
 
 // New builds a Server. web is the filesystem holding the static UI assets.
 func New(cfg *config.Config, fm *files.FS, web fs.FS, logger *log.Logger) *Server {
-	return &Server{cfg: cfg, fm: fm, web: web, logger: logger}
+	return &Server{
+		cfg:      cfg,
+		fm:       fm,
+		web:      web,
+		logger:   logger,
+		sessions: newSessionStore(),
+	}
 }
 
 // Handler returns the fully wired HTTP handler.
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/list", s.handleList)
-	mux.HandleFunc("GET /api/stat", s.handleStat)
-	mux.HandleFunc("GET /api/read", s.handleRead)
-	mux.HandleFunc("GET /api/download", s.handleDownload)
-	mux.HandleFunc("GET /api/info", s.handleInfo)
-	mux.HandleFunc("DELETE /api/delete", s.handleDelete)
-	mux.HandleFunc("POST /api/mkdir", s.handleMkdir)
-	mux.HandleFunc("POST /api/rename", s.handleRename)
-	mux.HandleFunc("POST /api/create", s.handleCreate)
-	mux.HandleFunc("PUT /api/write", s.handleWrite)
-	mux.HandleFunc("POST /api/upload", s.handleUpload)
-	mux.Handle("/", http.FileServer(http.FS(s.web)))
+	app := http.NewServeMux()
+	app.HandleFunc("GET /api/list", s.handleList)
+	app.HandleFunc("GET /api/stat", s.handleStat)
+	app.HandleFunc("GET /api/read", s.handleRead)
+	app.HandleFunc("GET /api/download", s.handleDownload)
+	app.HandleFunc("GET /api/info", s.handleInfo)
+	app.HandleFunc("DELETE /api/delete", s.handleDelete)
+	app.HandleFunc("POST /api/mkdir", s.handleMkdir)
+	app.HandleFunc("POST /api/rename", s.handleRename)
+	app.HandleFunc("POST /api/create", s.handleCreate)
+	app.HandleFunc("PUT /api/write", s.handleWrite)
+	app.HandleFunc("POST /api/upload", s.handleUpload)
+	app.Handle("/", http.FileServer(http.FS(s.web)))
 
-	return s.withLogging(s.withAuth(mux))
+	mux := http.NewServeMux()
+	// Public routes: the login form, logout, and the assets the form needs.
+	mux.HandleFunc("GET /login", s.handleLoginPage)
+	mux.HandleFunc("POST /login", s.handleLoginSubmit)
+	mux.HandleFunc("POST /logout", s.handleLogout)
+	mux.Handle("GET /static/", http.FileServer(http.FS(s.web)))
+	// Everything else needs a session (or Basic credentials).
+	mux.Handle("/", s.withAuth(app))
+
+	return s.withLogging(mux)
 }
 
 // --- middleware -----------------------------------------------------------
 
 func (s *Server) withAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, pass, ok := r.BasicAuth()
-		if !ok || !equal(user, s.cfg.Admin) || !equal(pass, s.cfg.Password) {
-			w.Header().Set("WWW-Authenticate", `Basic realm="Go File Manager", charset="UTF-8"`)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if s.authenticate(r) {
+			next.ServeHTTP(w, r)
 			return
 		}
-		next.ServeHTTP(w, r)
+		// Deliberately no WWW-Authenticate header: it would make browsers pop
+		// up their native credential dialog. API calls get JSON, page requests
+		// are sent to the login form instead.
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "unauthorized"})
+			return
+		}
+		http.Redirect(w, r, loginPath+"?next="+url.QueryEscape(r.URL.RequestURI()), http.StatusFound)
 	})
 }
 

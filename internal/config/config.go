@@ -21,7 +21,8 @@ type Config struct {
 	// HomeDir is the absolute root folder exposed by the app. It is the
 	// resolved (symlink-free) form of the HOME_DIR setting.
 	HomeDir string
-	// Admin and Password gate HTTP Basic authentication.
+	// Admin and Password are the credentials for the login form, and for HTTP
+	// Basic auth on the API.
 	Admin    string
 	Password string
 	// Port is the TCP port the HTTP server listens on.
