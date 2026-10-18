@@ -5,10 +5,12 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,6 +41,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/delete", s.handleDelete)
 	mux.HandleFunc("POST /api/mkdir", s.handleMkdir)
 	mux.HandleFunc("POST /api/rename", s.handleRename)
+	mux.HandleFunc("POST /api/create", s.handleCreate)
+	mux.HandleFunc("PUT /api/write", s.handleWrite)
+	mux.HandleFunc("POST /api/upload", s.handleUpload)
 	mux.Handle("/", http.FileServer(http.FS(s.web)))
 
 	return s.withLogging(s.withAuth(mux))
@@ -169,6 +174,70 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"path": rel, "name": name})
+}
+
+func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
+	rel := r.URL.Query().Get("path")
+	if err := s.fm.Create(rel); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"created": rel})
+}
+
+func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {
+	rel := r.URL.Query().Get("path")
+	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, files.MaxWriteSize))
+	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{"error": "file is too large to save"})
+			return
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := s.fm.Write(rel, data); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"path": rel, "size": len(data)})
+}
+
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	dir := r.URL.Query().Get("path")
+	r.Body = http.MaxBytesReader(w, r.Body, files.MaxUploadSize)
+	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	defer r.MultipartForm.RemoveAll()
+
+	parts := r.MultipartForm.File["file"]
+	if len(parts) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no files in request"})
+		return
+	}
+
+	uploaded := []string{}
+	failed := []map[string]string{}
+	for _, part := range parts {
+		name := filepath.Base(part.Filename)
+		src, err := part.Open()
+		if err != nil {
+			failed = append(failed, map[string]string{"name": name, "error": err.Error()})
+			continue
+		}
+		err = s.fm.Upload(dir, name, src)
+		src.Close()
+		if err != nil {
+			failed = append(failed, map[string]string{"name": name, "error": err.Error()})
+			continue
+		}
+		uploaded = append(uploaded, name)
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"uploaded": uploaded, "failed": failed})
 }
 
 func (s *Server) writeError(w http.ResponseWriter, err error) {

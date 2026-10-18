@@ -13,6 +13,11 @@
     viewerClose: document.getElementById("viewer-close"),
     viewerDelete: document.getElementById("viewer-delete"),
     viewerRename: document.getElementById("viewer-rename"),
+    viewerEdit: document.getElementById("viewer-edit"),
+    viewerSave: document.getElementById("viewer-save"),
+    viewerCancel: document.getElementById("viewer-cancel"),
+    viewerEditor: document.getElementById("viewer-editor"),
+    fileInput: document.getElementById("file-input"),
     contextMenu: document.getElementById("context-menu"),
     confirmModal: document.getElementById("confirm-modal"),
     confirmTitle: document.getElementById("confirm-title"),
@@ -35,6 +40,8 @@
 
   let currentPath = "/";
   let openEntry = null;
+  let editing = false;
+  let openFileEditable = false;
   let currentEntries = [];
   let filterText = "";
   let sortKey = "name";
@@ -146,6 +153,29 @@
       "POST",
       "/api/rename?path=" + encodeURIComponent(path) + "&name=" + encodeURIComponent(name)
     );
+  }
+
+  function apiCreate(path) {
+    return sendJSON("POST", "/api/create?path=" + encodeURIComponent(path));
+  }
+
+  async function apiWrite(path, content) {
+    const res = await fetch("/api/write?path=" + encodeURIComponent(path), {
+      method: "PUT",
+      headers: { "Content-Type": "text/plain; charset=utf-8", Accept: "application/json" },
+      body: content,
+    });
+    if (!res.ok) {
+      let message = res.status + " " + res.statusText;
+      try {
+        const data = await res.json();
+        if (data && data.error) message = data.error;
+      } catch (_) {
+        /* not JSON */
+      }
+      throw new Error(message);
+    }
+    return res.json();
   }
 
   const ICONS = {
@@ -401,26 +431,65 @@
   }
 
   async function openFile(entry) {
+    cancelEdit();
     openEntry = entry;
+    openFileEditable = false;
     els.viewer.hidden = false;
     els.viewerName.textContent = entry.name;
     els.viewerBody.textContent = "Loading…";
     els.viewerDownload.href = "/api/download?path=" + encodeURIComponent(entry.path);
     els.viewerDownload.setAttribute("download", entry.name);
+    els.viewerEdit.hidden = true;
 
     try {
       const data = await api("/api/read", entry.path);
       els.viewerBody.textContent = data.content;
+      // Binary files (containing NUL bytes) are not safe to edit as text.
+      openFileEditable = data.content.indexOf("\u0000") === -1;
     } catch (err) {
       els.viewerBody.textContent =
         "Cannot preview this file.\n\n" + err.message + "\n\nUse Download instead.";
+      openFileEditable = false;
     }
+    els.viewerEdit.hidden = !openFileEditable;
   }
 
   function closeViewer() {
+    cancelEdit();
     els.viewer.hidden = true;
     els.viewerBody.textContent = "";
     openEntry = null;
+  }
+
+  function startEdit() {
+    if (!openEntry || !openFileEditable) return;
+    editing = true;
+    els.viewer.classList.add("editing");
+    els.viewerBody.hidden = true;
+    els.viewerEditor.hidden = false;
+    els.viewerEditor.value = els.viewerBody.textContent;
+    els.viewerEditor.focus();
+  }
+
+  function cancelEdit() {
+    editing = false;
+    els.viewer.classList.remove("editing");
+    els.viewerBody.hidden = false;
+    els.viewerEditor.hidden = true;
+    els.viewerEditor.value = "";
+  }
+
+  async function saveEdit() {
+    if (!openEntry) return;
+    const entry = openEntry;
+    try {
+      await apiWrite(entry.path, els.viewerEditor.value);
+      els.viewerBody.textContent = els.viewerEditor.value;
+      cancelEdit();
+      setStatus('Saved "' + entry.name + '".', false);
+    } catch (err) {
+      setStatus("Failed to save " + entry.name + ": " + err.message, true);
+    }
   }
 
   // --- confirmation dialog (replaces window.confirm) ---
@@ -555,6 +624,70 @@
     }
   }
 
+  async function createFile() {
+    const name = await promptDialog({ title: "New file", value: "", confirmLabel: "Create" });
+    if (name === null) return; // cancelled
+    if (name === "") {
+      setStatus("File name cannot be empty.", true);
+      return;
+    }
+    if (invalidSegment(name)) {
+      setStatus('Invalid file name "' + name + '".', true);
+      return;
+    }
+
+    const base = currentPath === "/" ? "" : currentPath;
+    try {
+      await apiCreate(base + "/" + name);
+      await navigate(currentPath);
+      setStatus('Created file "' + name + '".', false);
+    } catch (err) {
+      setStatus("Failed to create file: " + err.message, true);
+    }
+  }
+
+  async function uploadFiles(fileList) {
+    if (!fileList || fileList.length === 0) return;
+
+    const form = new FormData();
+    Array.prototype.forEach.call(fileList, function (file) {
+      form.append("file", file, file.name);
+    });
+
+    try {
+      const res = await fetch("/api/upload?path=" + encodeURIComponent(currentPath), {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: form,
+      });
+      const data = await res.json().catch(function () {
+        return {};
+      });
+      if (!res.ok) {
+        throw new Error((data && data.error) || res.status + " " + res.statusText);
+      }
+
+      const uploaded = data.uploaded || [];
+      const failed = data.failed || [];
+      await navigate(currentPath);
+
+      if (uploaded.length && failed.length === 0) {
+        setStatus("Uploaded " + uploaded.length + " file(s).", false);
+      } else if (uploaded.length) {
+        setStatus("Uploaded " + uploaded.length + ", failed " + failed.length + ".", true);
+      } else {
+        const detail = failed.map(function (f) {
+          return f.name + ": " + f.error;
+        }).join("; ");
+        setStatus("Upload failed" + (detail ? " — " + detail : "."), true);
+      }
+    } catch (err) {
+      setStatus("Upload failed: " + err.message, true);
+    } finally {
+      els.fileInput.value = "";
+    }
+  }
+
   async function deleteEntry(entry) {
     const kind = entry.isDir ? "folder" : "file";
     const extra = entry.isDir ? " and everything inside it" : "";
@@ -598,9 +731,12 @@
   }
 
   function globalMenuItems() {
-    return [{ label: "New folder", action: function () { createFolder(); } }, { separator: true }].concat(
-      viewMenuItems()
-    );
+    return [
+      { label: "New folder", action: function () { createFolder(); } },
+      { label: "New file", action: function () { createFile(); } },
+      { label: "Upload files…", action: function () { els.fileInput.click(); } },
+      { separator: true },
+    ].concat(viewMenuItems());
   }
 
   function buildMenu(x, y, items) {
@@ -679,12 +815,26 @@
     if (openEntry) renameEntry(openEntry);
   });
 
+  els.viewerEdit.addEventListener("click", startEdit);
+  els.viewerSave.addEventListener("click", saveEdit);
+  els.viewerCancel.addEventListener("click", cancelEdit);
+
+  els.fileInput.addEventListener("change", function () {
+    uploadFiles(els.fileInput.files);
+  });
+
   els.viewerClose.addEventListener("click", closeViewer);
   els.viewer.addEventListener("click", function (e) {
-    if (e.target === els.viewer) closeViewer();
+    if (e.target === els.viewer && !editing) closeViewer();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape") closeViewer();
+    if (e.key === "Escape" && !els.viewer.hidden) {
+      if (editing) cancelEdit();
+      else closeViewer();
+    } else if ((e.ctrlKey || e.metaKey) && e.key === "s" && editing) {
+      e.preventDefault();
+      saveEdit();
+    }
   });
 
   // --- filter and sort ---

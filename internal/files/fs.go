@@ -4,6 +4,7 @@ package files
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -25,6 +26,12 @@ var (
 
 // MaxReadSize is the largest file the API will return as a text preview.
 const MaxReadSize = 2 << 20 // 2 MiB
+
+// MaxUploadSize is the largest total upload accepted by the API.
+const MaxUploadSize = 64 << 20 // 64 MiB
+
+// MaxWriteSize is the largest body accepted when saving an edited file.
+const MaxWriteSize = 8 << 20 // 8 MiB
 
 // Entry is a serialisable description of a file or directory.
 type Entry struct {
@@ -218,8 +225,7 @@ func (f *FS) Mkdir(rel string) error {
 // same directory. newName must be a plain name with no path separators. Renaming
 // onto an existing path fails with os.ErrExist rather than overwriting it.
 func (f *FS) Rename(rel, newName string) error {
-	if newName == "" || newName == "." || newName == ".." ||
-		strings.ContainsRune(newName, '/') || strings.ContainsRune(newName, os.PathSeparator) {
+	if !validName(newName) {
 		return ErrInvalidName
 	}
 	oldFull, err := f.resolveTarget(rel)
@@ -234,6 +240,67 @@ func (f *FS) Rename(rel, newName string) error {
 		return os.ErrExist
 	}
 	return os.Rename(oldFull, newFull)
+}
+
+// validName reports whether name is usable as a single file/folder name.
+func validName(name string) bool {
+	if name == "" || name == "." || name == ".." {
+		return false
+	}
+	return !strings.ContainsRune(name, '/') && !strings.ContainsRune(name, os.PathSeparator)
+}
+
+// Create makes a new, empty file at rel. It fails with os.ErrExist if the path
+// already exists.
+func (f *FS) Create(rel string) error {
+	full, err := f.resolveTarget(rel)
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(full, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	return file.Close()
+}
+
+// Write replaces the contents of the file at rel. Writing through a symlink is
+// refused so a link can never be used to modify a file outside the root.
+func (f *FS) Write(rel string, data []byte) error {
+	full, err := f.resolveTarget(rel)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(full)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return ErrForbidden
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s is a directory", rel)
+	}
+	return os.WriteFile(full, data, 0o644)
+}
+
+// Upload streams src into a new file called name inside dirRel. It fails with
+// os.ErrExist if the target already exists and never overwrites.
+func (f *FS) Upload(dirRel, name string, src io.Reader) error {
+	if !validName(name) {
+		return ErrInvalidName
+	}
+	full, err := f.resolveTarget(path.Join(dirRel, name))
+	if err != nil {
+		return err
+	}
+	file, err := os.OpenFile(full, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	_, err = io.Copy(file, src)
+	return err
 }
 
 // Delete removes a file or directory. Directories are removed non-recursively

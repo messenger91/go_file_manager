@@ -40,7 +40,8 @@ Always run `make fmt vet test` before finishing; all three currently pass.
 - `internal/config` — env/`.env` loading. Precedence: **process env > `.env` > defaults**.
   `.env` is read from the current working directory.
 - `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`,
-  `Delete`, `Mkdir`, `Rename`). This is the security boundary; test changes here.
+  `Delete`, `Mkdir`, `Rename`, `Create`, `Write`, `Upload`). This is the security
+  boundary; test changes here.
 - `internal/server` — HTTP routes, Basic auth, JSON/error handling.
 - `web/` — static UI (`index.html`, `static/style.css`, `static/app.js`). **Assets are
   embedded at build time**, so edits require a rebuild/restart, not just a refresh.
@@ -54,11 +55,15 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   **clamped into the root** (yields 404 for nonexistent paths), not rejected; symlink
   escapes that resolve outside the root return 403. Keep both behaviors.
 - `/api/read` refuses files over `files.MaxReadSize` (2 MiB) so callers download instead.
-- Delete, mkdir, and rename use `resolveTarget` (not `resolve`): it resolves the parent
-  but never the final element, so operating on a symlink affects the link and leaves its
-  target intact, even when the target is outside the root. Operating on the root returns
-  `ErrRootOperation` (400), as does an invalid new name (`ErrInvalidName`). A non-empty
-  directory without `recursive=true` returns `ErrDirNotEmpty` (409); `Mkdir`/`Rename` onto
-  an existing path returns `os.ErrExist` (409) and a missing source/parent returns
-  `os.ErrNotExist` (404).
-- No upload/move endpoints yet. Add them only against confirmed scope.
+- Every mutation (delete, mkdir, rename, create, write, upload) uses `resolveTarget`
+  (not `resolve`): it resolves the parent but never the final element, so operating on a
+  symlink affects the link and leaves its target intact, even when the target is outside
+  the root. `Write` additionally refuses a symlink target outright (`ErrForbidden`, 403).
+  Operating on the root returns `ErrRootOperation` (400), as does an invalid new name
+  (`ErrInvalidName`). A non-empty directory without `recursive=true` returns
+  `ErrDirNotEmpty` (409); `Mkdir`/`Rename`/`Create`/`Upload` onto an existing path returns
+  `os.ErrExist` (409) and a missing source/parent returns `os.ErrNotExist` (404).
+- Size limits: `files.MaxReadSize` (2 MiB, `/api/read`), `files.MaxWriteSize` (8 MiB,
+  `/api/write` body), `files.MaxUploadSize` (64 MiB, `/api/upload`). Overwriting is never
+  implicit: write requires an existing file, create/upload refuse an existing path.
+- No move endpoint yet (rename is same-folder only). Add it only against confirmed scope.

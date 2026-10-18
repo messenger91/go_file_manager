@@ -310,3 +310,120 @@ func TestRenameSameNameNoop(t *testing.T) {
 		t.Fatalf("file missing after no-op rename: %v", err)
 	}
 }
+
+func TestCreateFile(t *testing.T) {
+	root := t.TempDir()
+	f := New(root)
+
+	if err := f.Create("/new.txt"); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, "new.txt"))
+	if err != nil {
+		t.Fatalf("file not created: %v", err)
+	}
+	if !info.Mode().IsRegular() || info.Size() != 0 {
+		t.Fatalf("expected empty regular file, got mode=%v size=%d", info.Mode(), info.Size())
+	}
+}
+
+func TestCreateExistingFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Create("/a.txt"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("create existing error = %v, want os.ErrExist", err)
+	}
+}
+
+func TestCreateRootRejected(t *testing.T) {
+	f := New(t.TempDir())
+	if err := f.Create("/"); !errors.Is(err, ErrRootOperation) {
+		t.Fatalf("create root error = %v, want ErrRootOperation", err)
+	}
+}
+
+func TestWriteFile(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(target, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Write("/a.txt", []byte("new content")); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if data, _ := os.ReadFile(target); string(data) != "new content" {
+		t.Fatalf("content = %q, want %q", data, "new content")
+	}
+}
+
+func TestWriteMissingFails(t *testing.T) {
+	f := New(t.TempDir())
+	if err := f.Write("/nope.txt", []byte("x")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("write missing error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestWriteThroughSymlinkRejected(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(target, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	f := New(root)
+	if err := f.Write("/link.txt", []byte("hacked")); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("write through symlink error = %v, want ErrForbidden", err)
+	}
+	if data, _ := os.ReadFile(target); string(data) != "original" {
+		t.Fatalf("symlink target was modified: %q", data)
+	}
+}
+
+func TestUpload(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Upload("/sub", "up.txt", strings.NewReader("payload")); err != nil {
+		t.Fatalf("upload: %v", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "sub", "up.txt")); string(data) != "payload" {
+		t.Fatalf("uploaded content = %q", data)
+	}
+}
+
+func TestUploadExistingFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Upload("/", "a.txt", strings.NewReader("new")); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("upload existing error = %v, want os.ErrExist", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "a.txt")); string(data) != "keep" {
+		t.Fatalf("existing file was overwritten: %q", data)
+	}
+}
+
+func TestUploadInvalidName(t *testing.T) {
+	f := New(t.TempDir())
+	for _, name := range []string{"", ".", "..", "a/b"} {
+		if err := f.Upload("/", name, strings.NewReader("x")); !errors.Is(err, ErrInvalidName) {
+			t.Errorf("Upload(%q) error = %v, want ErrInvalidName", name, err)
+		}
+	}
+}

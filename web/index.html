@@ -58,13 +58,17 @@
       <div class="viewer-head">
         <span class="viewer-title" id="viewer-name"></span>
         <div class="viewer-actions">
-          <button id="viewer-rename" class="btn" type="button">Rename</button>
-          <button id="viewer-delete" class="btn danger" type="button">Delete</button>
-          <a id="viewer-download" class="btn" href="#" download>Download</a>
-          <button id="viewer-close" class="btn" type="button">Close</button>
+          <button id="viewer-edit" class="btn when-browse" type="button">Edit</button>
+          <button id="viewer-save" class="btn when-edit" type="button">Save</button>
+          <button id="viewer-cancel" class="btn when-edit" type="button">Cancel</button>
+          <button id="viewer-rename" class="btn when-browse" type="button">Rename</button>
+          <button id="viewer-delete" class="btn danger when-browse" type="button">Delete</button>
+          <a id="viewer-download" class="btn when-browse" href="#" download>Download</a>
+          <button id="viewer-close" class="btn when-browse" type="button">Close</button>
         </div>
       </div>
       <pre class="viewer-body" id="viewer-body"></pre>
+      <textarea id="viewer-editor" class="viewer-editor" spellcheck="false" hidden></textarea>
     </div>
   </div>
 
@@ -97,6 +101,8 @@
       </div>
     </div>
   </div>
+
+  <input id="file-input" type="file" multiple hidden>
 
   <script src="/static/app.js"></script>
 </body>

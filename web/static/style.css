@@ -488,6 +488,39 @@ main {
   word-break: break-word;
 }
 
+.viewer-editor {
+  flex: 1;
+  min-height: 40vh;
+  margin: 0;
+  padding: 1rem;
+  border: none;
+  resize: none;
+  background: var(--code-bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre;
+  overflow: auto;
+  outline: none;
+}
+
+.viewer-editor[hidden] {
+  display: none;
+}
+
+.when-edit {
+  display: none;
+}
+
+.viewer.editing .viewer-actions .when-edit {
+  display: inline-flex;
+}
+
+.viewer.editing .viewer-actions .when-browse {
+  display: none;
+}
+
 /* --- grid view --- */
 body[data-view="grid"] .listing {
   display: none;
