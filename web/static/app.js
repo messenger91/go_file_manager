@@ -322,10 +322,6 @@
       name.textContent = entry.name;
       name.title = entry.name;
 
-      const meta = document.createElement("div");
-      meta.className = "card-meta";
-      meta.textContent = entry.isDir ? "Folder" : formatSize(entry.size);
-
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.className = "btn danger card-delete";
@@ -337,7 +333,15 @@
         deleteEntry(entry);
       });
 
-      card.append(icon, name, meta, deleteBtn);
+      card.append(icon, name);
+      if (!entry.isDir) {
+        const meta = document.createElement("div");
+        meta.className = "card-meta";
+        meta.textContent = formatSize(entry.size);
+        card.appendChild(meta);
+      }
+      card.appendChild(deleteBtn);
+
       card.addEventListener("click", function () {
         if (entry.isDir) navigate(entry.path);
         else openFile(entry);
