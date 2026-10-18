@@ -15,6 +15,7 @@ previewing, and deleting files under a single root folder.
 - Preview text files in the browser, download any file
 - Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
 - HTTP Basic auth (default `admin` / `admin`)
+- Disk usage footer (used / free / total of the root filesystem)
 - Light and dark theme (remembered per browser)
 - Access confined to `HOME_DIR`; traversal is clamped into the root and symlink escapes are rejected
 
@@ -53,6 +54,7 @@ All endpoints require Basic auth.
 | GET    | `/api/stat`     | Metadata for one path                |
 | GET    | `/api/read`     | Text preview of a file (max 2 MiB)   |
 | GET    | `/api/download` | Raw file download                    |
+| GET    | `/api/info`     | Root path + disk usage                |
 | DELETE | `/api/delete`   | Delete a file or folder              |
 | POST   | `/api/mkdir`    | Create a folder                      |
 | POST   | `/api/rename`   | Rename a file or folder in place     |

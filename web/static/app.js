@@ -31,6 +31,9 @@
     promptCancel: document.getElementById("prompt-cancel"),
     filter: document.getElementById("filter"),
     itemCount: document.getElementById("item-count"),
+    footer: document.getElementById("footer"),
+    diskFill: document.getElementById("disk-fill"),
+    diskText: document.getElementById("disk-text"),
     viewToggle: document.getElementById("view-toggle"),
     listing: document.querySelector(".listing"),
     grid: document.getElementById("grid"),
@@ -274,6 +277,30 @@
         : shown + " of " + total + " items";
   }
 
+  async function loadServerInfo() {
+    let info;
+    try {
+      info = await sendJSON("GET", "/api/info");
+    } catch (_) {
+      return; // server info is best-effort; ignore failures
+    }
+    const disk = info && info.disk;
+    if (!disk || !disk.totalBytes) return;
+
+    const total = disk.totalBytes;
+    const free = disk.freeBytes || 0;
+    const used = disk.usedBytes || 0;
+    // Match `df`: the reserved blocks are excluded from both used and free.
+    const denom = used + free;
+    const percent = denom > 0 ? Math.min(100, Math.round((used / denom) * 100)) : 0;
+
+    els.diskFill.style.width = percent + "%";
+    els.diskFill.classList.toggle("warn", percent >= 90);
+    els.diskText.textContent =
+      formatSize(used) + " used · " + formatSize(free) + " free of " + formatSize(total);
+    els.footer.hidden = false;
+  }
+
   function emptyText() {
     return currentEntries.length === 0 ? "This folder is empty." : "No files match your filter.";
   }
@@ -424,6 +451,7 @@
       currentPath = data.path;
       renderBreadcrumbs(data.path);
       renderEntries(data.entries);
+      loadServerInfo();
     } catch (err) {
       setStatus("Failed to load " + path + ": " + err.message, true);
       renderEntries([]);

@@ -40,7 +40,7 @@ Always run `make fmt vet test` before finishing; all three currently pass.
 - `internal/config` — env/`.env` loading. Precedence: **process env > `.env` > defaults**.
   `.env` is read from the current working directory.
 - `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`,
-  `Delete`, `Mkdir`, `Rename`, `Create`, `Write`, `Upload`). This is the security
+  `Delete`, `Mkdir`, `Rename`, `Create`, `Write`, `Upload`, `Disk`). This is the security
   boundary; test changes here.
 - `internal/server` — HTTP routes, Basic auth, JSON/error handling.
 - `web/` — static UI (`index.html`, `static/style.css`, `static/app.js`). **Assets are
@@ -67,3 +67,7 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   `/api/write` body), `files.MaxUploadSize` (64 MiB, `/api/upload`). Overwriting is never
   implicit: write requires an existing file, create/upload refuse an existing path.
 - No move endpoint yet (rename is same-folder only). Add it only against confirmed scope.
+- `files.Disk` uses `syscall.Statfs`, so the code is Unix-only (fine for the Linux target,
+  but a Windows build would fail). `FreeBytes` is space available to the process
+  (`Bavail`), so `used + free < total` by the reserved blocks — the UI percentage matches
+  `df` by dividing by `used + free`.

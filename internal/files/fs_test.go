@@ -427,3 +427,20 @@ func TestUploadInvalidName(t *testing.T) {
 		}
 	}
 }
+
+func TestDisk(t *testing.T) {
+	f := New(t.TempDir())
+	info, err := f.Disk()
+	if err != nil {
+		t.Fatalf("disk: %v", err)
+	}
+	if info.TotalBytes == 0 {
+		t.Fatal("total bytes is zero")
+	}
+	if info.FreeBytes > info.TotalBytes {
+		t.Fatalf("free (%d) > total (%d)", info.FreeBytes, info.TotalBytes)
+	}
+	if info.UsedBytes > info.TotalBytes {
+		t.Fatalf("used (%d) > total (%d)", info.UsedBytes, info.TotalBytes)
+	}
+}

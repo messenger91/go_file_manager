@@ -38,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/stat", s.handleStat)
 	mux.HandleFunc("GET /api/read", s.handleRead)
 	mux.HandleFunc("GET /api/download", s.handleDownload)
+	mux.HandleFunc("GET /api/info", s.handleInfo)
 	mux.HandleFunc("DELETE /api/delete", s.handleDelete)
 	mux.HandleFunc("POST /api/mkdir", s.handleMkdir)
 	mux.HandleFunc("POST /api/rename", s.handleRename)
@@ -144,6 +145,18 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/octet-stream")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	disk, err := s.fm.Disk()
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"root": s.fm.Root(),
+		"disk": disk,
+	})
 }
 
 func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {

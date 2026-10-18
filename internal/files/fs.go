@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -301,6 +302,33 @@ func (f *FS) Upload(dirRel, name string, src io.Reader) error {
 	defer file.Close()
 	_, err = io.Copy(file, src)
 	return err
+}
+
+// DiskInfo describes the capacity of the filesystem holding the root.
+type DiskInfo struct {
+	Path       string `json:"path"`
+	TotalBytes uint64 `json:"totalBytes"`
+	FreeBytes  uint64 `json:"freeBytes"`
+	UsedBytes  uint64 `json:"usedBytes"`
+}
+
+// Disk reports the capacity of the filesystem containing the root. FreeBytes is
+// the space available to the current (unprivileged) process.
+func (f *FS) Disk() (DiskInfo, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(f.root, &stat); err != nil {
+		return DiskInfo{}, err
+	}
+	blockSize := uint64(stat.Bsize)
+	total := stat.Blocks * blockSize
+	free := stat.Bavail * blockSize
+	used := (stat.Blocks - stat.Bfree) * blockSize
+	return DiskInfo{
+		Path:       f.root,
+		TotalBytes: total,
+		FreeBytes:  free,
+		UsedBytes:  used,
+	}, nil
 }
 
 // Delete removes a file or directory. Directories are removed non-recursively

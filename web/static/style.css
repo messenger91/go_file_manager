@@ -607,6 +607,56 @@ body[data-view="list"] .grid {
   padding: 2rem;
 }
 
+/* --- footer / disk usage --- */
+.footer {
+  margin-top: 1rem;
+  padding: 0.6rem 0.9rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.footer[hidden] {
+  display: none;
+}
+
+.disk {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.disk-label {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.disk-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.disk-bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.disk-bar-fill.warn {
+  background: var(--danger);
+}
+
+.disk-text {
+  white-space: nowrap;
+}
+
 @media (hover: none) {
   .card-delete {
     opacity: 1;
