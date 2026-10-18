@@ -1,13 +1,14 @@
 # Go File Manager
 
-A small read-only file manager for Ubuntu Server 24 (LTS), written in Go with no
-external dependencies. It exposes a JSON API and a web UI for browsing and
-previewing files under a single root folder.
+A small file manager for Ubuntu Server 24 (LTS), written in Go with no
+external dependencies. It exposes a JSON API and a web UI for browsing,
+previewing, and deleting files under a single root folder.
 
 ## Features
 
 - Browse directories and view file metadata
 - Preview text files in the browser, download any file
+- Delete files and folders (recursive, with an in-browser confirmation)
 - HTTP Basic auth (default `admin` / `admin`)
 - Light and dark theme (remembered per browser)
 - Access confined to `HOME_DIR`; traversal is clamped into the root and symlink escapes are rejected
@@ -47,6 +48,11 @@ All endpoints require Basic auth.
 | GET    | `/api/stat`     | Metadata for one path                |
 | GET    | `/api/read`     | Text preview of a file (max 2 MiB)   |
 | GET    | `/api/download` | Raw file download                    |
+| DELETE | `/api/delete`   | Delete a file or folder              |
+
+`DELETE /api/delete?path=/sub` removes an empty folder (or a file). Deleting a
+non-empty folder returns `409 Conflict` unless `&recursive=true` is passed. The
+root folder itself can never be deleted.
 
 ## Development
 

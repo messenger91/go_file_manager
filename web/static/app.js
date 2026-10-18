@@ -11,9 +11,11 @@
     viewerBody: document.getElementById("viewer-body"),
     viewerDownload: document.getElementById("viewer-download"),
     viewerClose: document.getElementById("viewer-close"),
+    viewerDelete: document.getElementById("viewer-delete"),
   };
 
   let currentPath = "/";
+  let openEntry = null;
 
   // --- theme ---
   function applyTheme(theme) {
@@ -60,6 +62,23 @@
     const res = await fetch(endpoint + "?path=" + encodeURIComponent(path), {
       headers: { Accept: "application/json" },
     });
+    if (!res.ok) {
+      let message = res.status + " " + res.statusText;
+      try {
+        const data = await res.json();
+        if (data && data.error) message = data.error;
+      } catch (_) {
+        /* not JSON */
+      }
+      throw new Error(message);
+    }
+    return res.json();
+  }
+
+  async function apiDelete(path, recursive) {
+    const url =
+      "/api/delete?path=" + encodeURIComponent(path) + (recursive ? "&recursive=true" : "");
+    const res = await fetch(url, { method: "DELETE", headers: { Accept: "application/json" } });
     if (!res.ok) {
       let message = res.status + " " + res.statusText;
       try {
@@ -125,7 +144,7 @@
     if (!entries || entries.length === 0) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 3;
+      td.colSpan = 4;
       td.className = "empty";
       td.textContent = "This folder is empty.";
       tr.appendChild(td);
@@ -154,7 +173,21 @@
       timeCell.className = "col-time";
       timeCell.textContent = formatTime(entry.modTime);
 
-      tr.append(nameCell, sizeCell, timeCell);
+      const actionsCell = document.createElement("td");
+      actionsCell.className = "col-actions";
+      const deleteBtn = document.createElement("button");
+      deleteBtn.type = "button";
+      deleteBtn.className = "btn danger row-delete";
+      deleteBtn.title = "Delete";
+      deleteBtn.setAttribute("aria-label", "Delete " + entry.name);
+      deleteBtn.textContent = "🗑";
+      deleteBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        deleteEntry(entry);
+      });
+      actionsCell.appendChild(deleteBtn);
+
+      tr.append(nameCell, sizeCell, timeCell, actionsCell);
       tr.addEventListener("click", function () {
         if (entry.isDir) navigate(entry.path);
         else openFile(entry);
@@ -178,6 +211,7 @@
   }
 
   async function openFile(entry) {
+    openEntry = entry;
     els.viewer.hidden = false;
     els.viewerName.textContent = entry.name;
     els.viewerBody.textContent = "Loading…";
@@ -196,7 +230,28 @@
   function closeViewer() {
     els.viewer.hidden = true;
     els.viewerBody.textContent = "";
+    openEntry = null;
   }
+
+  async function deleteEntry(entry) {
+    const kind = entry.isDir ? "folder" : "file";
+    const extra = entry.isDir ? " and everything inside it" : "";
+    if (!window.confirm('Delete ' + kind + ' "' + entry.name + '"' + extra + "?\n\nThis cannot be undone.")) {
+      return;
+    }
+    try {
+      await apiDelete(entry.path, entry.isDir);
+      closeViewer();
+      await navigate(currentPath);
+      setStatus("Deleted " + kind + ' "' + entry.name + '".', false);
+    } catch (err) {
+      setStatus("Failed to delete " + entry.name + ": " + err.message, true);
+    }
+  }
+
+  els.viewerDelete.addEventListener("click", function () {
+    if (openEntry) deleteEntry(openEntry);
+  });
 
   els.viewerClose.addEventListener("click", closeViewer);
   els.viewer.addEventListener("click", function (e) {

@@ -2,10 +2,10 @@
 
 ## What this is
 
-Read-only file manager: a Go HTTP server (JSON API + embedded web UI) that exposes
-everything under a single root folder. No external dependencies — **stdlib only, on
-purpose**. There is no `go.sum`; adding a third-party import is a design change, not a
-detail.
+File manager: a Go HTTP server (JSON API + embedded web UI) that exposes everything
+under a single root folder. Browsing and previewing are read-only; deleting is
+supported. No external dependencies — **stdlib only, on purpose**. There is no
+`go.sum`; adding a third-party import is a design change, not a detail.
 
 Requires **Go 1.25+** (the router uses method patterns like `"GET /api/list"`).
 
@@ -31,8 +31,8 @@ Always run `make fmt vet test` before finishing; all three currently pass.
 - `main.go` — entrypoint; embeds `web/` via `//go:embed all:web` and serves it.
 - `internal/config` — env/`.env` loading. Precedence: **process env > `.env` > defaults**.
   `.env` is read from the current working directory.
-- `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`).
-  This is the security boundary; test changes here.
+- `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`,
+  `Delete`). This is the security boundary; test changes here.
 - `internal/server` — HTTP routes, Basic auth, JSON/error handling.
 - `web/` — static UI (`index.html`, `static/style.css`, `static/app.js`). **Assets are
   embedded at build time**, so edits require a rebuild/restart, not just a refresh.
@@ -45,6 +45,10 @@ Always run `make fmt vet test` before finishing; all three currently pass.
 - API path args are root-relative slash paths in `?path=/sub/file`. Traversal (`..`) is
   **clamped into the root** (yields 404 for nonexistent paths), not rejected; symlink
   escapes that resolve outside the root return 403. Keep both behaviors.
-- Read-only by design for the first release: there are deliberately no write/mkdir/
-  delete/upload endpoints. Do not add them without confirming scope.
 - `/api/read` refuses files over `files.MaxReadSize` (2 MiB) so callers download instead.
+- Delete uses `resolveNoFollow` (not `resolve`): it resolves the parent but never the
+  final element, so deleting a symlink unlinks the link and leaves its target intact,
+  even when the target is outside the root. Deleting the root returns
+  `ErrRootDelete` (400). A non-empty directory without `recursive=true` returns
+  `ErrDirNotEmpty` (409).
+- Still no mkdir/rename/upload/move endpoints. Add them only against confirmed scope.

@@ -119,6 +119,27 @@ body {
   line-height: 1;
 }
 
+.btn.danger {
+  color: var(--danger);
+}
+
+.btn.danger:hover {
+  border-color: var(--danger);
+  background: var(--danger-bg);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* --- listing --- */
 main {
   padding: 1.25rem;
@@ -210,6 +231,28 @@ main {
   text-align: center;
   color: var(--muted);
   cursor: default;
+}
+
+.col-actions {
+  width: 64px;
+  text-align: right;
+}
+
+.row-delete {
+  opacity: 0.5;
+  padding: 0.25rem 0.45rem;
+  transition: opacity 0.15s ease;
+}
+
+.listing tbody tr:hover .row-delete,
+.row-delete:focus {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .row-delete {
+    opacity: 1;
+  }
 }
 
 /* --- viewer --- */

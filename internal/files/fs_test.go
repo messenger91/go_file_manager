@@ -1,6 +1,7 @@
 package files
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -73,5 +74,77 @@ func TestReadFileRejectsLargeFile(t *testing.T) {
 	f := New(root)
 	if _, _, err := f.ReadFile("/big.bin"); err == nil {
 		t.Fatal("expected large file to be rejected")
+	}
+}
+
+func TestDeleteRootRejected(t *testing.T) {
+	f := New(t.TempDir())
+	for _, p := range []string{"/", "", "/.", "/sub/.."} {
+		if err := f.Delete(p, true); !errors.Is(err, ErrRootDelete) {
+			t.Errorf("Delete(%q) error = %v, want ErrRootDelete", p, err)
+		}
+	}
+}
+
+func TestDeleteNonEmptyDirRequiresRecursive(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := New(root)
+	if err := f.Delete("/sub", false); !errors.Is(err, ErrDirNotEmpty) {
+		t.Fatalf("non-recursive delete error = %v, want ErrDirNotEmpty", err)
+	}
+	if err := f.Delete("/sub", true); err != nil {
+		t.Fatalf("recursive delete: %v", err)
+	}
+	if _, err := os.Stat(sub); !os.IsNotExist(err) {
+		t.Fatalf("sub still exists after recursive delete: %v", err)
+	}
+}
+
+func TestDeleteFile(t *testing.T) {
+	root := t.TempDir()
+	target := filepath.Join(root, "a.txt")
+	if err := os.WriteFile(target, []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	f := New(root)
+	if err := f.Delete("/a.txt", false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Fatalf("file still exists: %v", err)
+	}
+}
+
+// Deleting a symlink removes the link, never its target outside the root.
+func TestDeleteSymlinkRemovesLinkOnly(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	target := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(target, []byte("secret"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "link.txt")
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+
+	f := New(root)
+	if err := f.Delete("/link.txt", false); err != nil {
+		t.Fatalf("delete symlink: %v", err)
+	}
+	if _, err := os.Lstat(link); !os.IsNotExist(err) {
+		t.Fatalf("symlink still exists: %v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("symlink target was removed: %v", err)
 	}
 }

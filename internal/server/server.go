@@ -36,6 +36,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/stat", s.handleStat)
 	mux.HandleFunc("GET /api/read", s.handleRead)
 	mux.HandleFunc("GET /api/download", s.handleDownload)
+	mux.HandleFunc("DELETE /api/delete", s.handleDelete)
 	mux.Handle("/", http.FileServer(http.FS(s.web)))
 
 	return s.withLogging(s.withAuth(mux))
@@ -138,6 +139,16 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
+func (s *Server) handleDelete(w http.ResponseWriter, r *http.Request) {
+	rel := r.URL.Query().Get("path")
+	recursive := r.URL.Query().Get("recursive") == "true"
+	if err := s.fm.Delete(rel, recursive); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": rel})
+}
+
 func (s *Server) writeError(w http.ResponseWriter, err error) {
 	status := http.StatusInternalServerError
 	switch {
@@ -145,6 +156,10 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		status = http.StatusForbidden
 	case errors.Is(err, os.ErrNotExist):
 		status = http.StatusNotFound
+	case errors.Is(err, files.ErrRootDelete):
+		status = http.StatusBadRequest
+	case errors.Is(err, files.ErrDirNotEmpty):
+		status = http.StatusConflict
 	}
 	if status >= http.StatusInternalServerError {
 		s.logger.Printf("error: %v", err)
