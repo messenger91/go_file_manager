@@ -22,6 +22,8 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Filter the current folder and sort by name, size, or modified date
 - Responsive, mobile-first list (compact rows; the Modified column starts hidden on narrow screens)
 - Preview text files in the browser, download any file
+- Download a file straight from the list or grid: every file row and card gets a quick ⬇
+  button (and the viewer's Download link carries the same icon)
 - Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
 - Login page with an in-memory session cookie (default `admin` / `admin`); HTTP Basic auth
   still works for scripts and API clients

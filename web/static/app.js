@@ -656,17 +656,35 @@
     } else if (col.key === "time") {
       td.textContent = formatTime(entry.modTime);
     } else if (col.key === "actions") {
+      const actions = document.createElement("span");
+      actions.className = "row-actions";
+
+      if (!entry.isDir) {
+        const downloadBtn = document.createElement("button");
+        downloadBtn.type = "button";
+        downloadBtn.className = "btn row-download icon-action";
+        downloadBtn.title = "Download";
+        downloadBtn.setAttribute("aria-label", "Download " + entry.name);
+        downloadBtn.appendChild(menuIcon("download"));
+        downloadBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          downloadEntry(entry);
+        });
+        actions.appendChild(downloadBtn);
+      }
+
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
-      deleteBtn.className = "btn danger row-delete";
+      deleteBtn.className = "btn danger row-delete icon-action";
       deleteBtn.title = "Delete";
       deleteBtn.setAttribute("aria-label", "Delete " + entry.name);
-      deleteBtn.textContent = "🗑";
+      deleteBtn.appendChild(menuIcon("delete"));
       deleteBtn.addEventListener("click", function (e) {
         e.stopPropagation();
         deleteEntry(entry);
       });
-      td.appendChild(deleteBtn);
+      actions.appendChild(deleteBtn);
+      td.appendChild(actions);
     }
     return td;
   }
@@ -857,16 +875,34 @@
       name.textContent = entry.name;
       name.title = entry.name;
 
+      const actions = document.createElement("div");
+      actions.className = "card-actions";
+
+      if (!entry.isDir) {
+        const downloadBtn = document.createElement("button");
+        downloadBtn.type = "button";
+        downloadBtn.className = "btn card-download icon-action";
+        downloadBtn.title = "Download";
+        downloadBtn.setAttribute("aria-label", "Download " + entry.name);
+        downloadBtn.appendChild(menuIcon("download"));
+        downloadBtn.addEventListener("click", function (e) {
+          e.stopPropagation();
+          downloadEntry(entry);
+        });
+        actions.appendChild(downloadBtn);
+      }
+
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
-      deleteBtn.className = "btn danger card-delete";
+      deleteBtn.className = "btn danger card-delete icon-action";
       deleteBtn.title = "Delete";
       deleteBtn.setAttribute("aria-label", "Delete " + entry.name);
-      deleteBtn.textContent = "🗑";
+      deleteBtn.appendChild(menuIcon("delete"));
       deleteBtn.addEventListener("click", function (e) {
         e.stopPropagation();
         deleteEntry(entry);
       });
+      actions.appendChild(deleteBtn);
 
       card.append(icon, name);
       if (!entry.isDir) {
@@ -875,7 +911,7 @@
         meta.textContent = formatSize(entry.size);
         card.appendChild(meta);
       }
-      card.appendChild(deleteBtn);
+      card.appendChild(actions);
       card.dataset.path = entry.path;
 
       card.addEventListener("click", function () {
@@ -883,6 +919,8 @@
         else openFile(entry);
       });
       card.addEventListener("keydown", function (e) {
+        // Ignore Enter/Space on the quick-action buttons inside the card.
+        if (e.target !== card) return;
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
           if (entry.isDir) navigate(entry.path);
@@ -1550,6 +1588,9 @@
   els.viewerDelete.addEventListener("click", function () {
     if (openEntry) deleteEntry(openEntry);
   });
+
+  els.viewerDownload.prepend(menuIcon("download"));
+  els.viewerDownload.classList.add("btn-with-icon");
 
   els.viewerRename.addEventListener("click", function () {
     if (openEntry) renameEntry(openEntry);

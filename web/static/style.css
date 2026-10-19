@@ -188,6 +188,19 @@ body {
   border-color: var(--border);
 }
 
+/* A button with a leading icon, e.g. the viewer's Download link. */
+.btn-with-icon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.btn-with-icon .menu-icon {
+  width: 1rem;
+  height: 1rem;
+  color: inherit;
+}
+
 .icon-btn {
   padding: 0.4rem 0.6rem;
   line-height: 1;
@@ -387,22 +400,46 @@ main {
 }
 
 .col-actions {
-  width: 56px;
+  width: 84px;
   text-align: right;
 }
 
+.row-actions {
+  display: inline-flex;
+  gap: 0.25rem;
+  justify-content: flex-end;
+}
+
+/* Icon-only quick action (download/delete) shared by rows and cards. */
+.icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.3rem;
+  line-height: 1;
+}
+
+.icon-action .menu-icon {
+  width: 1rem;
+  height: 1rem;
+  color: inherit;
+}
+
+.row-download,
 .row-delete {
-  opacity: 0.5;
-  padding: 0.25rem 0.45rem;
+  opacity: 0.55;
   transition: opacity 0.15s ease;
 }
 
+.listing tbody tr:hover .row-download,
 .listing tbody tr:hover .row-delete,
+.row-download:focus,
 .row-delete:focus {
   opacity: 1;
 }
 
 @media (hover: none) {
+  .row-download,
   .row-delete {
     opacity: 1;
   }
@@ -862,18 +899,25 @@ body[data-view="grid"] #columns-toggle {
   color: var(--muted);
 }
 
-.card-delete {
+.card-actions {
   position: absolute;
-  top: 0.35rem;
-  right: 0.35rem;
-  opacity: 0.5;
-  padding: 0.2rem 0.4rem;
+  top: 0.3rem;
+  right: 0.3rem;
+  display: flex;
+  gap: 0.2rem;
+  opacity: 0.55;
   transition: opacity 0.15s ease;
 }
 
-.card:hover .card-delete,
-.card-delete:focus {
+.card:hover .card-actions,
+.card:focus-within .card-actions,
+.card-actions:focus-within {
   opacity: 1;
+}
+
+.card-download,
+.card-delete {
+  padding: 0.25rem;
 }
 
 .grid .empty {
@@ -961,7 +1005,7 @@ body[data-view="grid"] #columns-toggle {
 }
 
 @media (hover: none) {
-  .card-delete {
+  .card-actions {
     opacity: 1;
   }
 

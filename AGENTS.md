@@ -94,6 +94,14 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   .current` span with `aria-current="page"`, separated by decorative `›`; long paths
   auto-scroll to the end and get `.fade-left`/`.fade-right` masks from
   `updateBreadcrumbFade()`.
+- Table and grid quick actions share one builder: `renderCell()` (actions column) wraps its
+  buttons in `.row-actions`, and `renderGrid()` wraps card buttons in `.card-actions`.
+  Both build each button from `menuIcon("download" | "delete")`, so list/grid/context-menu
+  icons stay in sync; `.icon-action` sizes them and makes the SVG inherit the button colour
+  (`.btn.danger` turns the trash red). Files get Download, folders only Delete. The card
+  `keydown` handler ignores events whose `target` is not the card so Enter on a quick
+  action does not also open the preview. Dimming (`opacity` until hover) is disabled under
+  `@media (hover: none)`.
 - The context menu is built from item objects (`{label, icon, danger, checked, action}`
   or `{separator: true}`) by `buildMenu()`; icons are inline SVG path strings in
   `MENU_ICONS`, so they inherit `currentColor` (danger items go red) with no image files.
