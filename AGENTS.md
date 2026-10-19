@@ -84,6 +84,11 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   "larger than the 50 MB limit" message (the limit is on the **whole multipart body**, so
   it includes MIME framing overhead).
 - No move endpoint yet (rename is same-folder only). Add it only against confirmed scope.
+- The top bar's 📤 button (`#upload-toggle`) opens the file picker and uploads into the
+  folder currently shown (`currentPath`), sharing the same modal/progress flow as the
+  context-menu entry. It is the primary upload path on touch devices. All header controls
+  are `flex: none`; below 600px the wordmark is hidden and icon buttons get 40px targets,
+  and below 380px the brand is dropped entirely so breadcrumbs keep the width.
 - The list table's `<thead>` is built by `renderTableHead()` from `activeColumns()` in
   `app.js`; the Columns menu persists visibility + order in the `columns` localStorage key
   (`[[key, visible], …]`). Modified starts hidden below 640px (`defaultColumnPrefs`), at

@@ -54,6 +54,7 @@
     memFill: document.getElementById("mem-fill"),
     memText: document.getElementById("mem-text"),
     viewToggle: document.getElementById("view-toggle"),
+    uploadToggle: document.getElementById("upload-toggle"),
     grid: document.getElementById("grid"),
   };
 
@@ -1393,6 +1394,12 @@
 
   els.fileInput.addEventListener("change", function () {
     uploadFiles(els.fileInput.files);
+  });
+
+  // The header button is the upload path on touch devices, where the
+  // right-click context menu is awkward or unavailable.
+  els.uploadToggle.addEventListener("click", function () {
+    els.fileInput.click();
   });
 
   els.infoToggle.addEventListener("click", openInfo);

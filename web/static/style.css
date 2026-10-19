@@ -124,6 +124,12 @@ body {
   display: flex;
 }
 
+/* Header controls keep their size; the breadcrumbs take the remaining width. */
+.topbar > .btn,
+.topbar > .logout-form {
+  flex: none;
+}
+
 .btn.danger {
   color: var(--danger);
 }
@@ -845,6 +851,21 @@ body[data-view="grid"] #columns-toggle {
     padding: 0.75rem;
   }
 
+  /* Make room for the upload button: drop the wordmark and tighten spacing. */
+  .topbar {
+    gap: 0.4rem;
+    padding: 0.55rem 0.7rem;
+  }
+
+  .brand-name {
+    display: none;
+  }
+
+  .topbar .icon-btn {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
+    padding: 0.4rem;
+  }
   .toolbar {
     flex-wrap: wrap;
   }
@@ -862,5 +883,12 @@ body[data-view="grid"] #columns-toggle {
   .col-size,
   .col-time {
     width: auto;
+  }
+}
+
+/* Very narrow phones: give the breadcrumbs every pixel available. */
+@media (max-width: 380px) {
+  .brand {
+    display: none;
   }
 }
