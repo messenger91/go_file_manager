@@ -1,5 +1,16 @@
 :root {
   color-scheme: light dark;
+
+  /* Folder colours: used by the folder SVG icon and the colour picker. */
+  --folder-red: #e0524a;
+  --folder-orange: #e08a2d;
+  --folder-yellow: #d9a520;
+  --folder-green: #3ba55c;
+  --folder-teal: #2ba3a0;
+  --folder-blue: #4a86e8;
+  --folder-purple: #9165e0;
+  --folder-pink: #d95fa3;
+  --folder-default: #e0b04a;
 }
 
 html[data-theme="light"] {
@@ -292,6 +303,44 @@ main {
   font-size: 0.82rem;
 }
 
+/* Grid card size control (only meaningful in grid view). */
+.size-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+body[data-view="list"] .size-toggle {
+  display: none;
+}
+
+.size-btn {
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: none;
+  border-left: 1px solid var(--border);
+  padding: 0.4rem 0.6rem;
+  cursor: pointer;
+}
+
+.size-btn:first-child {
+  border-left: none;
+}
+
+.size-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.size-btn.active {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
 .listing {
   width: 100%;
   border-collapse: collapse;
@@ -370,6 +419,54 @@ main {
 .listing .icon {
   flex: none;
   font-size: 1.05rem;
+}
+
+/* Folders render a filled SVG so the chosen colour can be applied. */
+.folder-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.folder-svg {
+  display: block;
+  width: 1em;
+  height: 1em;
+  fill: var(--folder-default);
+}
+
+.pin-badge {
+  flex: none;
+}
+
+.menu-icon.pin-badge {
+  width: 0.85rem;
+  height: 0.85rem;
+  color: var(--folder-default);
+}
+
+/* In grid cards the badge sits in the top-left corner, mirroring the actions. */
+.card .menu-icon.pin-badge {
+  position: absolute;
+  top: 0.45rem;
+  left: 0.45rem;
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+/* --- pinned / section rows --- */
+.listing .section-row td {
+  padding: 0.4rem 0.7rem;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.listing tbody tr.section-row:hover {
+  background: var(--surface-2);
 }
 
 .listing .name-label {
@@ -541,6 +638,55 @@ main {
   height: 1px;
   margin: 0.3rem 0.2rem;
   background: var(--border);
+}
+
+/* Folder colour picker inside the context menu. */
+.color-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.55rem 0.45rem;
+}
+
+.color-dot {
+  position: relative;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 1px solid rgba(0, 0, 0, 0.25);
+  border-radius: 50%;
+  cursor: pointer;
+}
+
+.color-dot:hover {
+  transform: scale(1.12);
+}
+
+.color-dot.selected {
+  box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+}
+
+.color-dot:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.color-dot.none {
+  background: var(--surface-2);
+  border-style: dashed;
+  border-color: var(--muted);
+}
+
+.color-dot.none::after {
+  content: "";
+  position: absolute;
+  top: 15%;
+  left: 50%;
+  width: 1px;
+  height: 70%;
+  background: var(--muted);
+  transform: translateX(-50%) rotate(45deg);
 }
 
 /* --- column settings --- */
@@ -849,6 +995,31 @@ body[data-view="grid"] #columns-toggle {
   gap: 0.75rem;
 }
 
+/* Card size, chosen from the S/M/L control in the toolbar. */
+.grid.size-s {
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 0.5rem;
+}
+
+.grid.size-m {
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+}
+
+.grid.size-l {
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 1rem;
+}
+
+.grid-section {
+  grid-column: 1 / -1;
+  padding: 0.15rem 0.1rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 /* The `hidden` attribute must beat the display rule above. */
 .grid[hidden] {
   display: none;
@@ -913,6 +1084,37 @@ body[data-view="grid"] #columns-toggle {
 .card:focus-within .card-actions,
 .card-actions:focus-within {
   opacity: 1;
+}
+
+.grid.size-s .card {
+  padding: 0.65rem 0.4rem 0.5rem;
+  gap: 0.3rem;
+}
+
+.grid.size-s .card-icon {
+  font-size: 1.4rem;
+}
+
+.grid.size-s .card-name {
+  font-size: 0.78rem;
+}
+
+.grid.size-s .card-meta {
+  display: none;
+}
+
+.grid.size-l .card {
+  padding: 1.35rem 0.9rem 1rem;
+}
+
+.grid.size-l .card-icon {
+  font-size: 2.9rem;
+}
+
+.grid.size-l .card-name {
+  font-size: 0.95rem;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
 }
 
 .card-download,
@@ -1012,6 +1214,11 @@ body[data-view="grid"] #columns-toggle {
   /* Comfortable tap targets for the long-press context menu. */
   .context-item {
     min-height: 2.75rem;
+  }
+
+  .color-dot {
+    width: 1.75rem;
+    height: 1.75rem;
   }
 }
 

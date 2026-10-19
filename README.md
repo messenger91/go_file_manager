@@ -18,6 +18,12 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Edit and save text files in the browser (the viewer's Edit button)
 - Rename files and folders (context menu, or the Rename button in the file viewer)
 - List and grid views, switchable from the top bar or the right-click context menu (remembered per browser)
+- Grid card sizes S / M / L from the toolbar, remembered per browser
+- Pin folders: pinned folders lead every listing in a "Pinned" section, so they are one click
+  away from anywhere in the tree (remembered per browser; pins follow a rename and are
+  dropped when the folder is deleted)
+- Folder colours: pick one of eight swatches from a folder's context menu and its icon is
+  drawn in that colour (remembered per browser)
 - Configurable list columns: show/hide and drag (or use ▲/▼) to reorder, remembered per browser
 - Filter the current folder and sort by name, size, or modified date
 - Responsive, mobile-first list (compact rows; the Modified column starts hidden on narrow screens)

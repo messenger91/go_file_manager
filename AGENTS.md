@@ -102,9 +102,27 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   `keydown` handler ignores events whose `target` is not the card so Enter on a quick
   action does not also open the preview. Dimming (`opacity` until hover) is disabled under
   `@media (hover: none)`.
-- The context menu is built from item objects (`{label, icon, danger, checked, action}`
-  or `{separator: true}`) by `buildMenu()`; icons are inline SVG path strings in
-  `MENU_ICONS`, so they inherit `currentColor` (danger items go red) with no image files.
+- Browser-only folder preferences live in three localStorage keys: `pinnedFolders`
+  (`[{path, name}]`, in pin order), `folderColors` (`{path: colorKey}`) and `gridSize`
+  (`s|m|l`). `pinnedFolders`/`folderColors`/`gridSize` are written with `saveStored()`
+  (JSON) and read with `loadStored()`; `gridSize` is a plain string. `folderColor()`
+  validates against `FOLDER_COLORS`, so a tampered entry cannot inject CSS.
+- Pinned folders render as a "Pinned" section above the current folder's entries (table:
+  `sectionRow()` + `.pinned-row`; grid: `.grid-section` + `.pinned-card`), and
+  `excludePinned()` keeps them out of the normal listing so nothing appears twice. A
+  shortcut from another folder still resolves an entry via `pinnedEntries()` (fallback in
+  the `contextmenu` handler). `rekeyFolderPaths()` runs after a successful rename and
+  `forgetFolderPaths()` after a delete so shortcuts and colours follow/expire with the
+  subtree. Folders use an inline SVG (`renderEntryIcon()` + `FOLDER_SVG`) rather than the
+  📁 emoji so `--folder-<color>` can be applied; files keep their emoji.
+- Grid size is applied by `applyGridSize()` as a `size-s|m|l` class on `#grid` plus
+  `aria-pressed` on the `.size-btn` buttons; the control is hidden in list view by
+  `body[data-view="list"] .size-toggle`.
+- The context menu is built from item objects (`{label, icon, danger, checked, action}`,
+  `{separator: true}` or `{swatches: true, current, onPick}`) by `buildMenu()`; icons are
+  inline SVG path strings in `MENU_ICONS`, so they inherit `currentColor` (danger items go
+  red) with no image files. The folder colour row comes from `colorRow()`; arrow-key
+  navigation walks `.context-item, .color-dot`.
   `showContextMenu`/`showViewMenu` add a `.context-title` (entry name, or the current
   path). The menu clamps to the viewport on all four edges, scrolls when taller than the
   screen, focuses its first item on open, supports ↑/↓/Home/End/Tab, and Escape closes it

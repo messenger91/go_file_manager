@@ -56,6 +56,7 @@
     memText: document.getElementById("mem-text"),
     viewToggle: document.getElementById("view-toggle"),
     uploadToggle: document.getElementById("upload-toggle"),
+    sizeToggle: document.getElementById("size-toggle"),
     grid: document.getElementById("grid"),
   };
 
@@ -188,6 +189,160 @@
     applyView(viewMode === "grid" ? "list" : "grid");
   });
 
+  // --- grid card size ---
+  const GRID_SIZES = ["s", "m", "l"];
+
+  function loadGridSize() {
+    const saved = localStorage.getItem("gridSize");
+    return GRID_SIZES.indexOf(saved) !== -1 ? saved : "m";
+  }
+
+  let gridSize = loadGridSize();
+
+  function applyGridSize(size) {
+    if (GRID_SIZES.indexOf(size) === -1) size = "m";
+    gridSize = size;
+    localStorage.setItem("gridSize", size);
+    els.grid.classList.remove("size-s", "size-m", "size-l");
+    els.grid.classList.add("size-" + size);
+    Array.prototype.forEach.call(els.sizeToggle.querySelectorAll(".size-btn"), function (button) {
+      const active = button.dataset.size === size;
+      button.classList.toggle("active", active);
+      button.setAttribute("aria-pressed", active ? "true" : "false");
+    });
+  }
+
+  els.sizeToggle.addEventListener("click", function (e) {
+    const button = e.target.closest(".size-btn");
+    if (button) applyGridSize(button.dataset.size);
+  });
+
+  // --- folder preferences: pinned folders + colors (per browser) ---
+  const FOLDER_COLORS = ["red", "orange", "yellow", "green", "teal", "blue", "purple", "pink"];
+
+  function loadStored(key, fallback) {
+    try {
+      const value = JSON.parse(localStorage.getItem(key));
+      return value === null || value === undefined ? fallback : value;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function saveStored(key, value) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch (_) {
+      /* storage unavailable (e.g. private mode): keep the in-memory state */
+    }
+  }
+
+  let pinnedFolders = loadStored("pinnedFolders", []);
+  if (!Array.isArray(pinnedFolders)) pinnedFolders = [];
+  pinnedFolders = pinnedFolders
+    .filter(function (item) {
+      return item && typeof item.path === "string" && item.path !== "" && item.path !== "/";
+    })
+    .map(function (item) {
+      return {
+        path: item.path,
+        name: typeof item.name === "string" && item.name ? item.name : item.path.split("/").pop(),
+      };
+    });
+
+  let folderColors = loadStored("folderColors", {});
+  if (!folderColors || typeof folderColors !== "object") folderColors = {};
+
+  function isPinned(path) {
+    return pinnedFolders.some(function (item) {
+      return item.path === path;
+    });
+  }
+
+  function togglePin(entry) {
+    if (isPinned(entry.path)) {
+      pinnedFolders = pinnedFolders.filter(function (item) {
+        return item.path !== entry.path;
+      });
+    } else {
+      pinnedFolders = pinnedFolders.concat([{ path: entry.path, name: entry.name }]);
+    }
+    saveStored("pinnedFolders", pinnedFolders);
+    renderList();
+    setStatus(
+      (isPinned(entry.path) ? "Pinned " : "Unpinned ") + '"' + entry.name + '".',
+      false
+    );
+  }
+
+  // Only palette values ever reach the DOM, so a tampered localStorage entry
+  // cannot inject CSS.
+  function folderColor(path) {
+    const color = folderColors[path];
+    return FOLDER_COLORS.indexOf(color) !== -1 ? color : "";
+  }
+
+  function setFolderColor(entry, color) {
+    const next = FOLDER_COLORS.indexOf(color) !== -1 ? color : "";
+    if (next) folderColors[entry.path] = next;
+    else delete folderColors[entry.path];
+    saveStored("folderColors", folderColors);
+    renderList();
+  }
+
+  function remapPath(path, oldPath, newPath) {
+    if (path === oldPath) return newPath;
+    if (path.indexOf(oldPath + "/") === 0) return newPath + path.slice(oldPath.length);
+    return path;
+  }
+
+  // Renaming a folder moves it and its whole subtree, so pinned shortcuts and
+  // stored colours have to follow it.
+  function rekeyFolderPaths(oldPath, newPath) {
+    let pinsChanged = false;
+    pinnedFolders = pinnedFolders.map(function (item) {
+      const mapped = remapPath(item.path, oldPath, newPath);
+      if (mapped === item.path) return item;
+      pinsChanged = true;
+      return { path: mapped, name: mapped.split("/").pop() };
+    });
+    if (pinsChanged) saveStored("pinnedFolders", pinnedFolders);
+
+    let colorsChanged = false;
+    const colors = {};
+    Object.keys(folderColors).forEach(function (path) {
+      const mapped = remapPath(path, oldPath, newPath);
+      if (mapped !== path) colorsChanged = true;
+      colors[mapped] = folderColors[path];
+    });
+    if (colorsChanged) {
+      folderColors = colors;
+      saveStored("folderColors", folderColors);
+    }
+  }
+
+  // Deleting a folder drops shortcuts and colours for it and its subtree.
+  function forgetFolderPaths(path) {
+    const keep = function (candidate) {
+      return candidate !== path && candidate.indexOf(path + "/") !== 0;
+    };
+
+    const before = pinnedFolders.length;
+    pinnedFolders = pinnedFolders.filter(function (item) {
+      return keep(item.path);
+    });
+    if (pinnedFolders.length !== before) saveStored("pinnedFolders", pinnedFolders);
+
+    let colorsChanged = false;
+    Object.keys(folderColors).forEach(function (candidate) {
+      if (!keep(candidate)) {
+        delete folderColors[candidate];
+        colorsChanged = true;
+      }
+    });
+    if (colorsChanged) saveStored("folderColors", folderColors);
+  }
+
   // --- helpers ---
   function formatSize(bytes) {
     if (bytes < 1024) return bytes + " B";
@@ -315,6 +470,27 @@
     if (entry.isDir) return "📁";
     const ext = entry.name.includes(".") ? entry.name.split(".").pop().toLowerCase() : "";
     return ICONS[ext] || "📄";
+  }
+
+  // Folders use a filled SVG instead of the 📁 emoji so a chosen colour can be
+  // applied; files keep their emoji icons.
+  const FOLDER_SVG =
+    '<svg class="folder-svg" viewBox="0 0 24 24" aria-hidden="true">' +
+    '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>' +
+    "</svg>";
+
+  function renderEntryIcon(el, entry) {
+    if (!entry.isDir) {
+      el.textContent = iconFor(entry);
+      return;
+    }
+    const color = folderColor(entry.path);
+    el.classList.add("folder-icon");
+    if (color) {
+      el.dataset.color = color;
+      el.style.fill = "var(--folder-" + color + ")";
+    }
+    el.innerHTML = FOLDER_SVG;
   }
 
   // --- rendering ---
@@ -569,10 +745,40 @@
     return currentEntries.length === 0 ? "This folder is empty." : "No files match your filter.";
   }
 
+  // Pinned folders are shortcuts: they lead the listing and are not repeated in
+  // the normal entries of the current folder.
+  function pinnedEntries() {
+    const query = filterText.trim().toLowerCase();
+    return pinnedFolders
+      .filter(function (item) {
+        if (item.path === currentPath) return false;
+        return !query || item.name.toLowerCase().indexOf(query) !== -1;
+      })
+      .map(function (item) {
+        return (
+          currentEntries.find(function (entry) {
+            return entry.path === item.path;
+          }) || { name: item.name, path: item.path, isDir: true, size: 0, modTime: "" }
+        );
+      });
+  }
+
+  function excludePinned(entries) {
+    if (pinnedFolders.length === 0) return entries;
+    const pinned = {};
+    pinnedFolders.forEach(function (item) {
+      pinned[item.path] = true;
+    });
+    return entries.filter(function (entry) {
+      return !pinned[entry.path];
+    });
+  }
+
   function renderList() {
     updateSortIndicators();
-    const entries = visibleEntries();
-    updateCount(currentEntries.length, entries.length);
+    const visible = visibleEntries();
+    updateCount(currentEntries.length, visible.length);
+    const entries = excludePinned(visible);
     if (viewMode === "grid") renderGrid(entries);
     else renderTable(entries);
   }
@@ -604,11 +810,42 @@
     updateSortIndicators();
   }
 
+  function sectionRow(label, colSpan) {
+    const tr = document.createElement("tr");
+    tr.className = "section-row";
+    const td = document.createElement("td");
+    td.colSpan = colSpan;
+    const span = document.createElement("span");
+    span.className = "section-label";
+    span.textContent = label;
+    td.appendChild(span);
+    tr.appendChild(td);
+    return tr;
+  }
+
+  function tableRow(entry, columns, pinned) {
+    const tr = document.createElement("tr");
+    tr.className = entry.isDir ? "dir" : "file";
+    if (pinned) tr.classList.add("pinned-row");
+    tr.dataset.path = entry.path;
+
+    columns.forEach(function (col) {
+      tr.appendChild(renderCell(col, entry, pinned));
+    });
+
+    tr.addEventListener("click", function () {
+      if (entry.isDir) navigate(entry.path);
+      else openFile(entry);
+    });
+    return tr;
+  }
+
   function renderTable(entries) {
     els.body.textContent = "";
     const columns = activeColumns();
+    const pinned = pinnedEntries();
 
-    if (entries.length === 0) {
+    if (entries.length === 0 && pinned.length === 0) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
       td.colSpan = columns.length;
@@ -619,24 +856,21 @@
       return;
     }
 
-    entries.forEach(function (entry) {
-      const tr = document.createElement("tr");
-      tr.className = entry.isDir ? "dir" : "file";
-      tr.dataset.path = entry.path;
-
-      columns.forEach(function (col) {
-        tr.appendChild(renderCell(col, entry));
+    if (pinned.length > 0) {
+      els.body.appendChild(sectionRow("Pinned", columns.length));
+      pinned.forEach(function (entry) {
+        els.body.appendChild(tableRow(entry, columns, true));
       });
-
-      tr.addEventListener("click", function () {
-        if (entry.isDir) navigate(entry.path);
-        else openFile(entry);
+    }
+    if (entries.length > 0) {
+      if (pinned.length > 0) els.body.appendChild(sectionRow("This folder", columns.length));
+      entries.forEach(function (entry) {
+        els.body.appendChild(tableRow(entry, columns, false));
       });
-      els.body.appendChild(tr);
-    });
+    }
   }
 
-  function renderCell(col, entry) {
+  function renderCell(col, entry, pinned) {
     const td = document.createElement("td");
     td.className = COLUMN_CLASS[col.key];
 
@@ -645,11 +879,12 @@
       wrap.className = "name-inner";
       const icon = document.createElement("span");
       icon.className = "icon";
-      icon.textContent = iconFor(entry);
+      renderEntryIcon(icon, entry);
       const label = document.createElement("span");
       label.className = "name-label";
       label.textContent = entry.name;
       wrap.append(icon, label);
+      if (pinned) wrap.appendChild(menuIcon("pin", "pin-badge"));
       td.appendChild(wrap);
     } else if (col.key === "size") {
       td.textContent = entry.isDir ? "—" : formatSize(entry.size);
@@ -850,10 +1085,89 @@
     renderColumnsMenu();
   }
 
+  function gridSection(label) {
+    const section = document.createElement("div");
+    section.className = "grid-section";
+    section.textContent = label;
+    return section;
+  }
+
+  function gridCard(entry, pinned) {
+    const card = document.createElement("div");
+    card.className = "card " + (entry.isDir ? "dir" : "file");
+    if (pinned) card.classList.add("pinned-card");
+    card.tabIndex = 0;
+
+    const icon = document.createElement("div");
+    icon.className = "card-icon";
+    renderEntryIcon(icon, entry);
+
+    const name = document.createElement("div");
+    name.className = "card-name";
+    name.textContent = entry.name;
+    name.title = entry.name;
+    if (pinned) name.appendChild(menuIcon("pin", "pin-badge"));
+
+    const actions = document.createElement("div");
+    actions.className = "card-actions";
+
+    if (!entry.isDir) {
+      const downloadBtn = document.createElement("button");
+      downloadBtn.type = "button";
+      downloadBtn.className = "btn card-download icon-action";
+      downloadBtn.title = "Download";
+      downloadBtn.setAttribute("aria-label", "Download " + entry.name);
+      downloadBtn.appendChild(menuIcon("download"));
+      downloadBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        downloadEntry(entry);
+      });
+      actions.appendChild(downloadBtn);
+    }
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.type = "button";
+    deleteBtn.className = "btn danger card-delete icon-action";
+    deleteBtn.title = "Delete";
+    deleteBtn.setAttribute("aria-label", "Delete " + entry.name);
+    deleteBtn.appendChild(menuIcon("delete"));
+    deleteBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      deleteEntry(entry);
+    });
+    actions.appendChild(deleteBtn);
+
+    card.append(icon, name);
+    if (!entry.isDir) {
+      const meta = document.createElement("div");
+      meta.className = "card-meta";
+      meta.textContent = formatSize(entry.size);
+      card.appendChild(meta);
+    }
+    card.appendChild(actions);
+    card.dataset.path = entry.path;
+
+    card.addEventListener("click", function () {
+      if (entry.isDir) navigate(entry.path);
+      else openFile(entry);
+    });
+    card.addEventListener("keydown", function (e) {
+      // Ignore Enter/Space on the quick-action buttons inside the card.
+      if (e.target !== card) return;
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        if (entry.isDir) navigate(entry.path);
+        else openFile(entry);
+      }
+    });
+    return card;
+  }
+
   function renderGrid(entries) {
     els.grid.textContent = "";
+    const pinned = pinnedEntries();
 
-    if (entries.length === 0) {
+    if (entries.length === 0 && pinned.length === 0) {
       const empty = document.createElement("div");
       empty.className = "empty";
       empty.textContent = emptyText();
@@ -861,74 +1175,18 @@
       return;
     }
 
-    entries.forEach(function (entry) {
-      const card = document.createElement("div");
-      card.className = "card " + (entry.isDir ? "dir" : "file");
-      card.tabIndex = 0;
-
-      const icon = document.createElement("div");
-      icon.className = "card-icon";
-      icon.textContent = iconFor(entry);
-
-      const name = document.createElement("div");
-      name.className = "card-name";
-      name.textContent = entry.name;
-      name.title = entry.name;
-
-      const actions = document.createElement("div");
-      actions.className = "card-actions";
-
-      if (!entry.isDir) {
-        const downloadBtn = document.createElement("button");
-        downloadBtn.type = "button";
-        downloadBtn.className = "btn card-download icon-action";
-        downloadBtn.title = "Download";
-        downloadBtn.setAttribute("aria-label", "Download " + entry.name);
-        downloadBtn.appendChild(menuIcon("download"));
-        downloadBtn.addEventListener("click", function (e) {
-          e.stopPropagation();
-          downloadEntry(entry);
-        });
-        actions.appendChild(downloadBtn);
-      }
-
-      const deleteBtn = document.createElement("button");
-      deleteBtn.type = "button";
-      deleteBtn.className = "btn danger card-delete icon-action";
-      deleteBtn.title = "Delete";
-      deleteBtn.setAttribute("aria-label", "Delete " + entry.name);
-      deleteBtn.appendChild(menuIcon("delete"));
-      deleteBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        deleteEntry(entry);
+    if (pinned.length > 0) {
+      els.grid.appendChild(gridSection("Pinned"));
+      pinned.forEach(function (entry) {
+        els.grid.appendChild(gridCard(entry, true));
       });
-      actions.appendChild(deleteBtn);
-
-      card.append(icon, name);
-      if (!entry.isDir) {
-        const meta = document.createElement("div");
-        meta.className = "card-meta";
-        meta.textContent = formatSize(entry.size);
-        card.appendChild(meta);
-      }
-      card.appendChild(actions);
-      card.dataset.path = entry.path;
-
-      card.addEventListener("click", function () {
-        if (entry.isDir) navigate(entry.path);
-        else openFile(entry);
+    }
+    if (entries.length > 0) {
+      if (pinned.length > 0) els.grid.appendChild(gridSection("This folder"));
+      entries.forEach(function (entry) {
+        els.grid.appendChild(gridCard(entry, false));
       });
-      card.addEventListener("keydown", function (e) {
-        // Ignore Enter/Space on the quick-action buttons inside the card.
-        if (e.target !== card) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          if (entry.isDir) navigate(entry.path);
-          else openFile(entry);
-        }
-      });
-      els.grid.appendChild(card);
-    });
+    }
   }
 
   async function navigate(path, options) {
@@ -1141,6 +1399,8 @@
 
     try {
       await apiRename(entry.path, name);
+      const parent = entry.path.slice(0, entry.path.lastIndexOf("/"));
+      rekeyFolderPaths(entry.path, parent + "/" + name);
       closeViewer();
       await navigate(currentPath);
       setStatus('Renamed "' + entry.name + '" to "' + name + '".', false);
@@ -1349,6 +1609,7 @@
 
     try {
       await apiDelete(entry.path, entry.isDir);
+      forgetFolderPaths(entry.path);
       closeViewer();
       await navigate(currentPath);
       setStatus("Deleted " + kind + ' "' + entry.name + '".', false);
@@ -1382,6 +1643,7 @@
     grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    pin: '<path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76z"/>',
   };
 
   // Element to refocus when the menu closes, if focus was inside the menu.
@@ -1408,6 +1670,42 @@
       (MENU_ICONS[name] || "") +
       "</svg>";
     return wrap;
+  }
+
+  // Colour swatches rendered inside the menu for folder entries.
+  function colorRow(current, onPick) {
+    const row = document.createElement("div");
+    row.className = "color-row";
+    row.setAttribute("role", "group");
+    row.setAttribute("aria-label", "Folder color");
+
+    function addDot(color, className) {
+      const dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = "color-dot" + (className ? " " + className : "");
+      if (color) {
+        dot.dataset.color = color;
+        dot.style.background = "var(--folder-" + color + ")";
+      }
+      const selected = current === color;
+      dot.classList.toggle("selected", selected);
+      dot.setAttribute("aria-pressed", selected ? "true" : "false");
+      const label = color ? color.charAt(0).toUpperCase() + color.slice(1) : "Default color";
+      dot.title = label;
+      dot.setAttribute("aria-label", label);
+      dot.addEventListener("click", function (e) {
+        e.stopPropagation();
+        hideContextMenu();
+        onPick(color);
+      });
+      row.appendChild(dot);
+    }
+
+    FOLDER_COLORS.forEach(function (color) {
+      addDot(color);
+    });
+    addDot("", "none");
+    return row;
   }
 
   function viewMenuItems() {
@@ -1448,6 +1746,10 @@
         const sep = document.createElement("div");
         sep.className = "context-sep";
         els.contextMenu.appendChild(sep);
+        return;
+      }
+      if (item.swatches) {
+        els.contextMenu.appendChild(colorRow(item.current, item.onPick));
         return;
       }
       const button = document.createElement("button");
@@ -1493,6 +1795,17 @@
           { label: "Open", icon: "open", action: function () { navigate(entry.path); } },
           { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
           { separator: true },
+          {
+            label: isPinned(entry.path) ? "Unpin folder" : "Pin folder",
+            icon: "pin",
+            action: function () { togglePin(entry); },
+          },
+          {
+            swatches: true,
+            current: folderColor(entry.path),
+            onPick: function (color) { setFolderColor(entry, color); },
+          },
+          { separator: true },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ]
       : [
@@ -1515,7 +1828,7 @@
   // dismisses it. Escape is handled by the global keydown listener.
   els.contextMenu.addEventListener("keydown", function (e) {
     const items = Array.prototype.slice.call(
-      els.contextMenu.querySelectorAll(".context-item")
+      els.contextMenu.querySelectorAll(".context-item, .color-dot")
     );
     if (items.length === 0) return;
     const index = items.indexOf(document.activeElement);
@@ -1563,11 +1876,19 @@
     e.preventDefault();
 
     const target = e.target.closest("[data-path]");
-    const entry =
+    let entry =
       target &&
       currentEntries.find(function (item) {
         return item.path === target.dataset.path;
       });
+    // A pinned shortcut can live in another folder, so it is not in
+    // currentEntries; fall back to the synthetic pinned entry.
+    if (!entry && target) {
+      const path = target.dataset.path;
+      entry = pinnedEntries().find(function (item) {
+        return item.path === path;
+      });
+    }
     if (entry) showContextMenu(e.clientX, e.clientY, entry);
     else showViewMenu(e.clientX, e.clientY);
   });
@@ -1688,6 +2009,7 @@
   });
 
   renderTableHead();
+  applyGridSize(gridSize);
   applyView(viewMode);
   navigate(currentPath);
 })();
