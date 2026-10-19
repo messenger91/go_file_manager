@@ -29,6 +29,13 @@
     promptInput: document.getElementById("prompt-input"),
     promptOk: document.getElementById("prompt-ok"),
     promptCancel: document.getElementById("prompt-cancel"),
+    uploadModal: document.getElementById("upload-modal"),
+    uploadTitle: document.getElementById("upload-title"),
+    uploadFiles: document.getElementById("upload-files"),
+    uploadProgress: document.getElementById("upload-progress"),
+    uploadProgressFill: document.getElementById("upload-progress-fill"),
+    uploadStatus: document.getElementById("upload-status"),
+    uploadCancel: document.getElementById("upload-cancel"),
     filter: document.getElementById("filter"),
     itemCount: document.getElementById("item-count"),
     head: document.getElementById("listing-head"),
@@ -1064,47 +1071,170 @@
     }
   }
 
-  async function uploadFiles(fileList) {
-    if (!fileList || fileList.length === 0) return;
+  // --- upload with progress ---
+  // The size limit mirrors files.MaxUploadSize on the server; it is enforced
+  // here too so an oversized batch fails before sending anything.
+  const MAX_UPLOAD_SIZE = 50 << 20; // 50 MiB
+
+  let uploadRequest = null;
+
+  function openUploadModal(files) {
+    const total = files.reduce(function (sum, file) {
+      return sum + file.size;
+    }, 0);
+
+    els.uploadTitle.textContent = "Uploading";
+    els.uploadFiles.textContent =
+      (files.length === 1 ? files[0].name : files.length + " files") +
+      " · " +
+      formatSize(total);
+    els.uploadStatus.textContent = "";
+    els.uploadStatus.classList.remove("error");
+    els.uploadProgressFill.style.width = "0%";
+    els.uploadProgressFill.classList.remove("done", "error");
+    els.uploadProgress.setAttribute("aria-valuenow", "0");
+    els.uploadCancel.hidden = false;
+    els.uploadCancel.disabled = false;
+    els.uploadModal.hidden = false;
+  }
+
+  function setUploadProgress(percent) {
+    const clamped = Math.max(0, Math.min(100, percent));
+    els.uploadProgressFill.style.width = clamped + "%";
+    els.uploadProgress.setAttribute("aria-valuenow", String(Math.round(clamped)));
+  }
+
+  function finishUpload() {
+    els.uploadCancel.hidden = true;
+    uploadRequest = null;
+  }
+
+  function closeUploadModal() {
+    els.uploadModal.hidden = true;
+  }
+
+  function uploadFiles(fileList) {
+    const files = Array.prototype.slice.call(fileList || []);
+    if (files.length === 0) return;
+
+    const total = files.reduce(function (sum, file) {
+      return sum + file.size;
+    }, 0);
+    if (total > MAX_UPLOAD_SIZE) {
+      setStatus(
+        "Upload is " +
+          formatSize(total) +
+          ", larger than the " +
+          formatSize(MAX_UPLOAD_SIZE) +
+          " limit.",
+        true
+      );
+      els.fileInput.value = "";
+      return;
+    }
 
     const form = new FormData();
-    Array.prototype.forEach.call(fileList, function (file) {
+    files.forEach(function (file) {
       form.append("file", file, file.name);
     });
 
-    try {
-      const res = await fetch("/api/upload?path=" + encodeURIComponent(currentPath), {
-        method: "POST",
-        headers: { Accept: "application/json" },
-        body: form,
-      });
-      const data = await res.json().catch(function () {
-        return {};
-      });
-      if (!res.ok) {
-        ensureAuthorized(res);
-        throw new Error((data && data.error) || res.status + " " + res.statusText);
+    openUploadModal(files);
+
+    // fetch() cannot report upload progress, so the upload uses XHR.
+    const xhr = new XMLHttpRequest();
+    uploadRequest = xhr;
+    xhr.open("POST", "/api/upload?path=" + encodeURIComponent(currentPath));
+    xhr.setRequestHeader("Accept", "application/json");
+
+    xhr.upload.addEventListener("progress", function (e) {
+      if (!e.lengthComputable) return;
+      const percent = (e.loaded / e.total) * 100;
+      setUploadProgress(percent);
+      els.uploadStatus.textContent =
+        formatSize(e.loaded) + " of " + formatSize(e.total) + " (" + Math.round(percent) + "%)";
+    });
+
+    xhr.upload.addEventListener("load", function () {
+      // The body is sent; the server now writes the files.
+      setUploadProgress(100);
+      els.uploadStatus.textContent = "Processing on the server…";
+    });
+
+    xhr.addEventListener("error", function () {
+      uploadFailed("Network error while uploading.");
+    });
+
+    xhr.addEventListener("abort", function () {
+      els.uploadProgressFill.classList.add("error");
+      els.uploadStatus.textContent = "Upload cancelled.";
+      els.uploadStatus.classList.add("error");
+      finishUpload();
+      els.fileInput.value = "";
+      setStatus("Upload cancelled.", true);
+    });
+
+    xhr.addEventListener("load", function () {
+      if (uploadRequest !== xhr) return; // already handled (aborted)
+      let data = {};
+      try {
+        data = JSON.parse(xhr.responseText);
+      } catch (_) {
+        data = {};
+      }
+
+      if (xhr.status === 401) {
+        finishUpload();
+        els.fileInput.value = "";
+        redirectToLogin();
+        return;
+      }
+      if (xhr.status < 200 || xhr.status >= 300) {
+        uploadFailed((data && data.error) || xhr.status + " " + xhr.statusText);
+        return;
       }
 
       const uploaded = data.uploaded || [];
       const failed = data.failed || [];
-      await navigate(currentPath);
-
-      if (uploaded.length && failed.length === 0) {
-        setStatus("Uploaded " + uploaded.length + " file(s).", false);
-      } else if (uploaded.length) {
-        setStatus("Uploaded " + uploaded.length + ", failed " + failed.length + ".", true);
-      } else {
-        const detail = failed.map(function (f) {
-          return f.name + ": " + f.error;
-        }).join("; ");
-        setStatus("Upload failed" + (detail ? " — " + detail : "."), true);
-      }
-    } catch (err) {
-      setStatus("Upload failed: " + err.message, true);
-    } finally {
+      els.uploadProgressFill.classList.add("done");
+      finishUpload();
       els.fileInput.value = "";
-    }
+
+      let message = "";
+      let isError = false;
+      if (uploaded.length && failed.length === 0) {
+        closeUploadModal();
+        message = "Uploaded " + uploaded.length + " file(s).";
+      } else if (uploaded.length) {
+        closeUploadModal();
+        message = "Uploaded " + uploaded.length + ", failed " + failed.length + ".";
+        isError = true;
+      } else {
+        const detail = failed
+          .map(function (f) {
+            return f.name + ": " + f.error;
+          })
+          .join("; ");
+        uploadFailed("Upload failed" + (detail ? " — " + detail : "."));
+        return;
+      }
+      // Refresh the listing first: navigate() clears the status line, so the
+      // message must be set after it finishes.
+      navigate(currentPath).then(function () {
+        setStatus(message, isError);
+      });
+    });
+
+    xhr.send(form);
+  }
+
+  function uploadFailed(message) {
+    setUploadProgress(100);
+    els.uploadProgressFill.classList.add("error");
+    els.uploadStatus.textContent = message;
+    els.uploadStatus.classList.add("error");
+    finishUpload();
+    els.fileInput.value = "";
+    setStatus(message, true);
   }
 
   async function deleteEntry(entry) {
@@ -1277,12 +1407,24 @@
   });
   els.columnsReset.addEventListener("click", resetColumns);
 
+  els.uploadCancel.addEventListener("click", function () {
+    if (uploadRequest) uploadRequest.abort();
+  });
+  // Clicking the backdrop must not hide the dialog mid-upload; only the
+  // Cancel button (or Escape) stops it, and those abort the request.
+  els.uploadModal.addEventListener("click", function (e) {
+    if (e.target === els.uploadModal && !uploadRequest) closeUploadModal();
+  });
+
   els.viewerClose.addEventListener("click", closeViewer);
   els.viewer.addEventListener("click", function (e) {
     if (e.target === els.viewer && !editing) closeViewer();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && !els.columnsMenu.hidden) {
+    if (e.key === "Escape" && !els.uploadModal.hidden) {
+      if (uploadRequest) uploadRequest.abort();
+      else closeUploadModal();
+    } else if (e.key === "Escape" && !els.columnsMenu.hidden) {
       hideColumnsMenu();
     } else if (e.key === "Escape" && !els.infoModal.hidden) {
       closeInfo();

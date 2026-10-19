@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -245,6 +246,13 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	dir := r.URL.Query().Get("path")
 	r.Body = http.MaxBytesReader(w, r.Body, files.MaxUploadSize)
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			writeJSON(w, http.StatusRequestEntityTooLarge, map[string]string{
+				"error": "upload is larger than the " + formatLimit(files.MaxUploadSize) + " limit",
+			})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -299,4 +307,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// formatLimit renders a byte limit for error messages ("50 MB").
+func formatLimit(bytes int64) string {
+	return strconv.FormatInt(bytes/(1<<20), 10) + " MB"
 }

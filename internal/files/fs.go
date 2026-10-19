@@ -29,7 +29,7 @@ var (
 const MaxReadSize = 2 << 20 // 2 MiB
 
 // MaxUploadSize is the largest total upload accepted by the API.
-const MaxUploadSize = 64 << 20 // 64 MiB
+const MaxUploadSize = 50 << 20 // 50 MiB
 
 // MaxWriteSize is the largest body accepted when saving an edited file.
 const MaxWriteSize = 8 << 20 // 8 MiB

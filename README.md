@@ -8,6 +8,8 @@ previewing, editing, uploading, and deleting files under a single root folder.
 
 - Browse directories and view file metadata
 - Create folders and files, and upload files, from the right-click context menu
+- Upload with a live progress bar and a Cancel button (50 MB limit, checked in the browser
+  and enforced by the server)
 - Edit and save text files in the browser (the viewer's Edit button)
 - Rename files and folders (context menu, or the Rename button in the file viewer)
 - List and grid views, switchable from the top bar or the right-click context menu (remembered per browser)
@@ -238,7 +240,8 @@ cannot be created.
 `PUT /api/write?path=/sub/note.txt` replaces a file's contents with the raw
 request body (limit 8 MiB); the file must already exist. `POST /api/upload?path=/dir`
 accepts multipart form data with one or more `file` parts and never overwrites —
-each name that already exists is reported in the `failed` array.
+each name that already exists is reported in the `failed` array. The whole upload is
+limited to 50 MiB; anything larger returns `413`.
 
 ## Development
 

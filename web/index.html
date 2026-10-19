@@ -142,6 +142,33 @@
     </div>
   </div>
 
+  <div class="modal" id="upload-modal" hidden>
+    <div
+      class="modal-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="upload-title"
+    >
+      <h2 class="modal-title" id="upload-title">Uploading</h2>
+      <p class="modal-message" id="upload-files"></p>
+      <div
+        class="progress"
+        id="upload-progress"
+        role="progressbar"
+        aria-labelledby="upload-title"
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow="0"
+      >
+        <div class="progress-fill" id="upload-progress-fill"></div>
+      </div>
+      <p class="upload-status" id="upload-status" aria-live="polite"></p>
+      <div class="modal-actions">
+        <button id="upload-cancel" class="btn danger" type="button">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <input id="file-input" type="file" multiple hidden>
 
   <script src="/static/app.js"></script>

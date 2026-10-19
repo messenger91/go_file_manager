@@ -78,8 +78,11 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   `ErrDirNotEmpty` (409); `Mkdir`/`Rename`/`Create`/`Upload` onto an existing path returns
   `os.ErrExist` (409) and a missing source/parent returns `os.ErrNotExist` (404).
 - Size limits: `files.MaxReadSize` (2 MiB, `/api/read`), `files.MaxWriteSize` (8 MiB,
-  `/api/write` body), `files.MaxUploadSize` (64 MiB, `/api/upload`). Overwriting is never
-  implicit: write requires an existing file, create/upload refuse an existing path.
+  `/api/write` body), `files.MaxUploadSize` (50 MiB, `/api/upload`). Overwriting is never
+  implicit: write requires an existing file, create/upload refuse an existing path. An
+  upload over the limit is rejected by `MaxBytesReader` and mapped to `413` with a
+  "larger than the 50 MB limit" message (the limit is on the **whole multipart body**, so
+  it includes MIME framing overhead).
 - No move endpoint yet (rename is same-folder only). Add it only against confirmed scope.
 - The list table's `<thead>` is built by `renderTableHead()` from `activeColumns()` in
   `app.js`; the Columns menu persists visibility + order in the `columns` localStorage key

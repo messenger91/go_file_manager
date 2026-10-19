@@ -536,6 +536,41 @@ main {
   border-color: var(--accent);
 }
 
+/* --- upload progress --- */
+.progress {
+  height: 10px;
+  margin: 0.25rem 0 0.6rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+
+.progress-fill.done {
+  background: var(--ok, var(--accent));
+}
+
+.progress-fill.error {
+  background: var(--danger);
+}
+
+.upload-status {
+  margin: 0 0 1.25rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.upload-status.error {
+  color: var(--danger);
+}
+
 /* --- viewer --- */
 .viewer {
   position: fixed;
