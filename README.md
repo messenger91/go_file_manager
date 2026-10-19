@@ -7,6 +7,8 @@ previewing, editing, uploading, and deleting files under a single root folder.
 ## Features
 
 - Browse directories and view file metadata
+- Breadcrumb trail (current folder highlighted, long paths scroll with edge fades) and a
+  Back arrow that returns to the folder you came from, including after a breadcrumb jump
 - Create folders and files, and upload files, from the right-click context menu
   (icon per action, keyboard navigation, and a title showing the target)
 - Upload from the 📤 button in the top bar, which targets the folder you are viewing

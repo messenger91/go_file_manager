@@ -21,7 +21,17 @@
       <span class="logo" aria-hidden="true">📁</span>
       <span class="brand-name">Go File Manager</span>
     </div>
-    <nav class="breadcrumbs" id="breadcrumbs" aria-label="Breadcrumb"></nav>
+    <nav class="nav" aria-label="Breadcrumb">
+      <button
+        id="nav-back"
+        class="btn icon-btn nav-back"
+        type="button"
+        aria-label="Back"
+        title="Back"
+        disabled
+      >←</button>
+      <div class="breadcrumbs" id="breadcrumbs"></div>
+    </nav>
     <button
       id="upload-toggle"
       class="btn icon-btn"

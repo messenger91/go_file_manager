@@ -3,6 +3,7 @@
 (function () {
   const els = {
     breadcrumbs: document.getElementById("breadcrumbs"),
+    navBack: document.getElementById("nav-back"),
     body: document.getElementById("listing-body"),
     status: document.getElementById("status"),
     themeToggle: document.getElementById("theme-toggle"),
@@ -317,36 +318,90 @@
   }
 
   // --- rendering ---
+  function updateBreadcrumbFade() {
+    const el = els.breadcrumbs;
+    const max = el.scrollWidth - el.clientWidth;
+    el.classList.toggle("fade-left", el.scrollLeft > 1);
+    el.classList.toggle("fade-right", max > 1 && el.scrollLeft < max - 1);
+  }
+
   function renderBreadcrumbs(path) {
     els.breadcrumbs.textContent = "";
     const parts = path.split("/").filter(Boolean);
-    const root = document.createElement("a");
-    root.href = "#";
-    root.textContent = "Home";
-    root.addEventListener("click", function (e) {
-      e.preventDefault();
-      navigate("/");
-    });
-    els.breadcrumbs.appendChild(root);
 
-    let acc = "";
-    parts.forEach(function (part) {
-      acc += "/" + part;
-      const sep = document.createElement("span");
-      sep.className = "sep";
-      sep.textContent = "/";
-      els.breadcrumbs.appendChild(sep);
+    function addCrumb(label, target, current) {
+      if (current) {
+        const span = document.createElement("span");
+        span.className = "crumb current";
+        span.setAttribute("aria-current", "page");
+        span.textContent = label;
+        span.title = label;
+        els.breadcrumbs.appendChild(span);
+        return;
+      }
 
       const link = document.createElement("a");
+      link.className = "crumb";
       link.href = "#";
-      link.textContent = part;
-      const target = acc;
+      link.textContent = label;
+      link.title = label;
       link.addEventListener("click", function (e) {
         e.preventDefault();
         navigate(target);
       });
       els.breadcrumbs.appendChild(link);
+
+      const sep = document.createElement("span");
+      sep.className = "sep";
+      sep.setAttribute("aria-hidden", "true");
+      sep.textContent = "›";
+      els.breadcrumbs.appendChild(sep);
+    }
+
+    addCrumb("Home", "/", parts.length === 0);
+    let acc = "";
+    parts.forEach(function (part, i) {
+      acc += "/" + part;
+      addCrumb(part, acc, i === parts.length - 1);
     });
+
+    // Long paths scroll sideways: keep the folder you are in visible instead
+    // of showing the start of the trail.
+    setTimeout(function () {
+      els.breadcrumbs.scrollLeft = els.breadcrumbs.scrollWidth;
+      updateBreadcrumbFade();
+    }, 0);
+  }
+
+  // Back goes to the folder you came from, or to the parent when there is no
+  // history yet (for example after a direct load or a refresh).
+  let navHistory = [];
+
+  function parentPath(path) {
+    if (path === "/") return "/";
+    const cut = path.lastIndexOf("/");
+    return cut <= 0 ? "/" : path.slice(0, cut);
+  }
+
+  function backTarget() {
+    if (navHistory.length > 0) return navHistory[navHistory.length - 1];
+    return currentPath === "/" ? null : parentPath(currentPath);
+  }
+
+  function updateBackButton() {
+    const target = backTarget();
+    const label = target === null ? "Back" : "Back to " + target;
+    els.navBack.disabled = target === null;
+    els.navBack.title = label;
+    els.navBack.setAttribute("aria-label", label);
+  }
+
+  function goBack() {
+    const target = backTarget();
+    if (target === null) return;
+    const fromHistory = navHistory.length > 0;
+    if (fromHistory) navHistory.pop();
+    navigate(target, { recordHistory: !fromHistory });
   }
 
   function renderEntries(entries) {
@@ -838,7 +893,8 @@
     });
   }
 
-  async function navigate(path) {
+  async function navigate(path, options) {
+    const record = !options || options.recordHistory !== false;
     setStatus("");
     closeViewer();
     try {
@@ -846,6 +902,10 @@
       if (data.path !== currentPath) {
         filterText = "";
         els.filter.value = "";
+        if (record) {
+          navHistory.push(currentPath);
+          if (navHistory.length > 50) navHistory.shift();
+        }
       }
       currentPath = data.path;
       renderBreadcrumbs(data.path);
@@ -854,6 +914,7 @@
       setStatus("Failed to load " + path + ": " + err.message, true);
       renderEntries([]);
     }
+    updateBackButton();
   }
 
   async function openFile(entry) {
@@ -1445,7 +1506,10 @@
     if (e.target && e.target.nodeType === 1 && els.contextMenu.contains(e.target)) return;
     hideContextMenu();
   }, true);
-  window.addEventListener("resize", hideContextMenu);
+  window.addEventListener("resize", function () {
+    hideContextMenu();
+    updateBreadcrumbFade();
+  });
 
   document.addEventListener("click", function (e) {
     hideContextMenu();
@@ -1504,6 +1568,9 @@
   els.uploadToggle.addEventListener("click", function () {
     els.fileInput.click();
   });
+
+  els.navBack.addEventListener("click", goBack);
+  els.breadcrumbs.addEventListener("scroll", updateBreadcrumbFade, { passive: true });
 
   els.infoToggle.addEventListener("click", openInfo);
   els.infoClose.addEventListener("click", closeInfo);

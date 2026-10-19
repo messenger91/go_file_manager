@@ -69,31 +69,95 @@ body {
   font-size: 1.2rem;
 }
 
+.nav {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.nav-back {
+  flex: none;
+  font-size: 1.05rem;
+  line-height: 1;
+}
+
 .breadcrumbs {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  gap: 0.15rem;
+  gap: 0.1rem;
   overflow-x: auto;
   white-space: nowrap;
   font-size: 0.9rem;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  scroll-behavior: smooth;
 }
 
-.breadcrumbs a {
-  color: var(--accent);
+.breadcrumbs::-webkit-scrollbar {
+  display: none;
+}
+
+/* Fade the edge that has more of the trail hidden behind it. */
+.breadcrumbs.fade-left {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 1.2rem);
+  mask-image: linear-gradient(to right, transparent, #000 1.2rem);
+}
+
+.breadcrumbs.fade-right {
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 1.2rem);
+  mask-image: linear-gradient(to left, transparent, #000 1.2rem);
+}
+
+.breadcrumbs.fade-left.fade-right {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 1.2rem, #000 calc(100% - 1.2rem), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 1.2rem, #000 calc(100% - 1.2rem), transparent);
+}
+
+.breadcrumbs .crumb {
+  display: inline-block;
+  max-width: 13rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+  line-height: 1.4;
+  padding: 0.2rem 0.45rem;
+  border-radius: 6px;
+  color: var(--muted);
   text-decoration: none;
-  padding: 0.15rem 0.35rem;
-  border-radius: 5px;
 }
 
-.breadcrumbs a:hover {
+.breadcrumbs a.crumb:hover {
   background: var(--hover);
+  color: var(--text);
+}
+
+.breadcrumbs a.crumb:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.breadcrumbs .crumb.current {
+  color: var(--text);
+  background: var(--surface-2);
+  font-weight: 600;
 }
 
 .breadcrumbs .sep {
+  flex: none;
+  padding: 0 0.05rem;
   color: var(--muted);
+  opacity: 0.6;
+  font-size: 0.95rem;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .breadcrumbs {
+    scroll-behavior: auto;
+  }
 }
 
 /* --- buttons --- */
@@ -112,6 +176,16 @@ body {
 .btn:hover {
   background: var(--hover);
   border-color: var(--accent);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn:disabled:hover {
+  background: var(--surface-2);
+  border-color: var(--border);
 }
 
 .icon-btn {
@@ -910,6 +984,14 @@ body[data-view="grid"] #columns-toggle {
 
   .brand-name {
     display: none;
+  }
+
+  .nav {
+    gap: 0.25rem;
+  }
+
+  .breadcrumbs .crumb {
+    max-width: 9rem;
   }
 
   .topbar .icon-btn {

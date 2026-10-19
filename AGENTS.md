@@ -84,6 +84,16 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   "larger than the 50 MB limit" message (the limit is on the **whole multipart body**, so
   it includes MIME framing overhead).
 - No move endpoint yet (rename is same-folder only). Add it only against confirmed scope.
+- Navigation is in-page only: `navigate()` never calls `history.pushState`, so the browser
+  Back button leaves the app. The in-app `#nav-back` arrow uses its own `navHistory` stack
+  (capped at 50): it returns to the previous folder, falls back to the parent when the
+  stack is empty, and is disabled at `/`. `goBack()` pops the stack and navigates with
+  `{recordHistory: false}` so back does not re-record the folder it just left; ordinary
+  navigations record the old path, and a same-path refresh (after a mutation) does not.
+  Breadcrumbs render ancestors as `.crumb` links and the current folder as a `.crumb
+  .current` span with `aria-current="page"`, separated by decorative `›`; long paths
+  auto-scroll to the end and get `.fade-left`/`.fade-right` masks from
+  `updateBreadcrumbFade()`.
 - The context menu is built from item objects (`{label, icon, danger, checked, action}`
   or `{separator: true}`) by `buildMenu()`; icons are inline SVG path strings in
   `MENU_ICONS`, so they inherit `currentColor` (danger items go red) with no image files.
