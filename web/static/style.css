@@ -211,9 +211,11 @@ main {
 .listing th,
 .listing td {
   text-align: left;
-  padding: 0.6rem 0.9rem;
-  border-bottom: 1px solid var(--border);
-  font-size: 0.9rem;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.88rem;
+  /* No per-cell borders: a border on a wrapped cell breaks the row line. The
+     separator lives on the row itself (see tbody tr below). */
+  border: 0;
 }
 
 .listing thead th {
@@ -252,23 +254,24 @@ main {
   line-height: 1;
 }
 
-.listing tbody tr:last-child td {
-  border-bottom: none;
+.listing tbody tr {
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
 }
 
-.listing tbody tr {
-  cursor: pointer;
+.listing tbody tr:last-child {
+  border-bottom: none;
 }
 
 .listing tbody tr:hover {
   background: var(--hover);
 }
 
-.listing .name {
+.listing .name-inner {
   display: flex;
   align-items: center;
   gap: 0.6rem;
-  word-break: break-all;
+  min-width: 0;
 }
 
 .listing .icon {
@@ -276,7 +279,11 @@ main {
   font-size: 1.05rem;
 }
 
-.listing tbody tr.dir .name span:last-child {
+.listing .name-label {
+  overflow-wrap: anywhere;
+}
+
+.listing tbody tr.dir .name-inner .name-label {
   font-weight: 600;
 }
 
@@ -284,11 +291,13 @@ main {
   width: 110px;
   text-align: right;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .col-time {
-  width: 200px;
+  width: 190px;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .empty {
@@ -298,7 +307,7 @@ main {
 }
 
 .col-actions {
-  width: 64px;
+  width: 56px;
   text-align: right;
 }
 
@@ -369,6 +378,102 @@ main {
   height: 1px;
   margin: 0.3rem 0.2rem;
   background: var(--border);
+}
+
+/* --- column settings --- */
+.columns-menu {
+  position: fixed;
+  z-index: 45;
+  min-width: 230px;
+  padding: 0.45rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+}
+
+.columns-menu[hidden] {
+  display: none;
+}
+
+.columns-title {
+  margin: 0.1rem 0.45rem 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.columns-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.column-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.45rem;
+  border-radius: 6px;
+  font-size: 0.88rem;
+}
+
+.column-item:hover {
+  background: var(--hover);
+}
+
+.column-item.dragging {
+  opacity: 0.5;
+}
+
+.column-handle {
+  flex: none;
+  color: var(--muted);
+  cursor: grab;
+  line-height: 1;
+  user-select: none;
+  touch-action: none;
+}
+
+.column-item label {
+  flex: 1;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.column-move {
+  flex: none;
+  padding: 0.05rem 0.3rem;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.2;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.column-move:hover:not([disabled]) {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.column-move[disabled] {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.columns-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.35rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border);
 }
 
 /* --- confirmation dialog --- */
@@ -535,6 +640,11 @@ body[data-view="list"] .grid {
   display: none;
 }
 
+/* Columns only exist in list view. */
+body[data-view="grid"] #columns-toggle {
+  display: none;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
@@ -696,10 +806,26 @@ body[data-view="list"] .grid {
 }
 
 @media (max-width: 600px) {
-  .col-time {
-    display: none;
-  }
   main {
     padding: 0.75rem;
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+  }
+
+  .filter-input {
+    max-width: none;
+  }
+
+  .listing th,
+  .listing td {
+    padding: 0.5rem 0.55rem;
+    font-size: 0.85rem;
+  }
+
+  .col-size,
+  .col-time {
+    width: auto;
   }
 }

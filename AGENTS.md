@@ -81,6 +81,14 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   `/api/write` body), `files.MaxUploadSize` (64 MiB, `/api/upload`). Overwriting is never
   implicit: write requires an existing file, create/upload refuse an existing path.
 - No move endpoint yet (rename is same-folder only). Add it only against confirmed scope.
+- The list table's `<thead>` is built by `renderTableHead()` from `activeColumns()` in
+  `app.js`; the Columns menu persists visibility + order in the `columns` localStorage key
+  (`[[key, visible], …]`). Modified starts hidden below 640px (`defaultColumnPrefs`), at
+  least one column must stay visible, and the actions column is pinned last. The Columns
+  button is hidden in grid view.
+- Row separators are `border-bottom` on `tbody tr`, **not** on `td`: a border on a wrapped
+  cell breaks the row line (the original bug). For the same reason `td.name` must stay a
+  table cell — the flex layout lives on the inner `.name-inner` span.
 - `files.Disk` uses `syscall.Statfs`, so the code is Unix-only (fine for the Linux target,
   but a Windows build would fail). `FreeBytes` is space available to the process
   (`Bavail`), so `used + free < total` by the reserved blocks — the UI percentage matches

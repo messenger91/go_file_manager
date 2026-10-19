@@ -31,6 +31,11 @@
     promptCancel: document.getElementById("prompt-cancel"),
     filter: document.getElementById("filter"),
     itemCount: document.getElementById("item-count"),
+    head: document.getElementById("listing-head"),
+    columnsToggle: document.getElementById("columns-toggle"),
+    columnsMenu: document.getElementById("columns-menu"),
+    columnsList: document.getElementById("columns-list"),
+    columnsReset: document.getElementById("columns-reset"),
     infoToggle: document.getElementById("info-toggle"),
     infoModal: document.getElementById("info-modal"),
     infoClose: document.getElementById("info-close"),
@@ -45,8 +50,6 @@
     grid: document.getElementById("grid"),
   };
 
-  const sortButtons = Array.prototype.slice.call(document.querySelectorAll(".sort"));
-
   let currentPath = "/";
   let openEntry = null;
   let editing = false;
@@ -56,6 +59,95 @@
   let sortKey = "name";
   let sortDir = "asc";
   let viewMode = localStorage.getItem("view") === "grid" ? "grid" : "list";
+
+  // --- list columns ---
+  const COLUMN_DEFS = [
+    { key: "name", label: "Name", sortable: true },
+    { key: "size", label: "Size", sortable: true },
+    { key: "time", label: "Modified", sortable: true },
+  ];
+  const ACTIONS_COLUMN = { key: "actions", label: "Actions", sortable: false };
+  const COLUMN_CLASS = {
+    name: "name",
+    size: "col-size",
+    time: "col-time",
+    actions: "col-actions",
+  };
+
+  function columnDef(key) {
+    return (
+      COLUMN_DEFS.find(function (def) {
+        return def.key === key;
+      }) || ACTIONS_COLUMN
+    );
+  }
+
+  // Mobile first: Modified is noisy on a narrow screen, so it starts hidden
+  // there and can be switched on from the Columns menu.
+  function defaultColumnPrefs() {
+    const wide = window.matchMedia("(min-width: 640px)").matches;
+    return COLUMN_DEFS.map(function (def) {
+      return { key: def.key, visible: def.key !== "time" || wide };
+    });
+  }
+
+  function loadColumnPrefs() {
+    const defaults = defaultColumnPrefs();
+    let saved;
+    try {
+      saved = JSON.parse(localStorage.getItem("columns"));
+    } catch (_) {
+      saved = null;
+    }
+    if (!Array.isArray(saved)) return defaults;
+
+    const known = {};
+    COLUMN_DEFS.forEach(function (def) {
+      known[def.key] = true;
+    });
+    const prefs = [];
+    saved.forEach(function (item) {
+      const key = Array.isArray(item) ? item[0] : item && item.key;
+      const visible = Array.isArray(item) ? item[1] : item && item.visible;
+      const dup = prefs.some(function (p) {
+        return p.key === key;
+      });
+      if (known[key] && !dup) prefs.push({ key: key, visible: visible !== false });
+    });
+    // Pick up any column that is new or missing from stored preferences.
+    defaults.forEach(function (def) {
+      const present = prefs.some(function (p) {
+        return p.key === def.key;
+      });
+      if (!present) prefs.push(def);
+    });
+    return prefs;
+  }
+
+  function saveColumnPrefs() {
+    localStorage.setItem(
+      "columns",
+      JSON.stringify(
+        columnPrefs.map(function (pref) {
+          return [pref.key, pref.visible];
+        })
+      )
+    );
+  }
+
+  let columnPrefs = loadColumnPrefs();
+
+  // Visible columns in order; the actions column is always pinned last.
+  function activeColumns() {
+    return columnPrefs
+      .filter(function (pref) {
+        return pref.visible;
+      })
+      .map(function (pref) {
+        return columnDef(pref.key);
+      })
+      .concat([ACTIONS_COLUMN]);
+  }
 
   // --- theme ---
   function applyTheme(theme) {
@@ -280,7 +372,8 @@
   }
 
   function updateSortIndicators() {
-    sortButtons.forEach(function (button) {
+    const buttons = els.head.querySelectorAll(".sort");
+    Array.prototype.forEach.call(buttons, function (button) {
       const active = button.dataset.key === sortKey;
       button.classList.toggle("active", active);
       button.querySelector(".sort-arrow").textContent = active ? (sortDir === "asc" ? "▲" : "▼") : "";
@@ -421,13 +514,41 @@
     else renderTable(entries);
   }
 
+  function renderTableHead() {
+    els.head.textContent = "";
+    activeColumns().forEach(function (col) {
+      const th = document.createElement("th");
+      th.className = COLUMN_CLASS[col.key];
+      if (col.sortable) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "sort";
+        button.dataset.key = col.key;
+        button.textContent = col.label;
+        const arrow = document.createElement("span");
+        arrow.className = "sort-arrow";
+        arrow.setAttribute("aria-hidden", "true");
+        button.appendChild(arrow);
+        th.appendChild(button);
+      } else {
+        const label = document.createElement("span");
+        label.className = "visually-hidden";
+        label.textContent = col.label;
+        th.appendChild(label);
+      }
+      els.head.appendChild(th);
+    });
+    updateSortIndicators();
+  }
+
   function renderTable(entries) {
     els.body.textContent = "";
+    const columns = activeColumns();
 
     if (entries.length === 0) {
       const tr = document.createElement("tr");
       const td = document.createElement("td");
-      td.colSpan = 4;
+      td.colSpan = columns.length;
       td.className = "empty";
       td.textContent = emptyText();
       tr.appendChild(td);
@@ -438,26 +559,40 @@
     entries.forEach(function (entry) {
       const tr = document.createElement("tr");
       tr.className = entry.isDir ? "dir" : "file";
+      tr.dataset.path = entry.path;
 
-      const nameCell = document.createElement("td");
-      nameCell.className = "name";
+      columns.forEach(function (col) {
+        tr.appendChild(renderCell(col, entry));
+      });
+
+      tr.addEventListener("click", function () {
+        if (entry.isDir) navigate(entry.path);
+        else openFile(entry);
+      });
+      els.body.appendChild(tr);
+    });
+  }
+
+  function renderCell(col, entry) {
+    const td = document.createElement("td");
+    td.className = COLUMN_CLASS[col.key];
+
+    if (col.key === "name") {
+      const wrap = document.createElement("span");
+      wrap.className = "name-inner";
       const icon = document.createElement("span");
       icon.className = "icon";
       icon.textContent = iconFor(entry);
       const label = document.createElement("span");
+      label.className = "name-label";
       label.textContent = entry.name;
-      nameCell.append(icon, label);
-
-      const sizeCell = document.createElement("td");
-      sizeCell.className = "col-size";
-      sizeCell.textContent = entry.isDir ? "—" : formatSize(entry.size);
-
-      const timeCell = document.createElement("td");
-      timeCell.className = "col-time";
-      timeCell.textContent = formatTime(entry.modTime);
-
-      const actionsCell = document.createElement("td");
-      actionsCell.className = "col-actions";
+      wrap.append(icon, label);
+      td.appendChild(wrap);
+    } else if (col.key === "size") {
+      td.textContent = entry.isDir ? "—" : formatSize(entry.size);
+    } else if (col.key === "time") {
+      td.textContent = formatTime(entry.modTime);
+    } else if (col.key === "actions") {
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
       deleteBtn.className = "btn danger row-delete";
@@ -468,16 +603,170 @@
         e.stopPropagation();
         deleteEntry(entry);
       });
-      actionsCell.appendChild(deleteBtn);
+      td.appendChild(deleteBtn);
+    }
+    return td;
+  }
 
-      tr.append(nameCell, sizeCell, timeCell, actionsCell);
-      tr.dataset.path = entry.path;
-      tr.addEventListener("click", function () {
-        if (entry.isDir) navigate(entry.path);
-        else openFile(entry);
+  // --- column settings ---
+  function applyColumnPrefs() {
+    renderTableHead();
+    renderList();
+  }
+
+  function renderColumnsMenu() {
+    els.columnsList.textContent = "";
+    const visibleCount = columnPrefs.filter(function (pref) {
+      return pref.visible;
+    }).length;
+
+    columnPrefs.forEach(function (pref, index) {
+      const def = columnDef(pref.key);
+      const item = document.createElement("li");
+      item.className = "column-item";
+      item.dataset.key = pref.key;
+
+      const handle = document.createElement("span");
+      handle.className = "column-handle";
+      handle.textContent = "⠿";
+      handle.title = "Drag to reorder";
+      handle.setAttribute("aria-hidden", "true");
+      // Only start a drag from the handle, so the checkbox stays clickable.
+      handle.addEventListener("pointerdown", function () {
+        item.draggable = true;
       });
-      els.body.appendChild(tr);
+
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.id = "column-vis-" + pref.key;
+      checkbox.checked = pref.visible;
+      // Never allow every column to be hidden.
+      checkbox.disabled = pref.visible && visibleCount === 1;
+      checkbox.addEventListener("change", function () {
+        pref.visible = checkbox.checked;
+        saveColumnPrefs();
+        applyColumnPrefs();
+        renderColumnsMenu();
+      });
+
+      const label = document.createElement("label");
+      label.htmlFor = checkbox.id;
+      label.textContent = def.label;
+
+      const up = moveButton("▲", "Move up", index === 0, function () {
+        moveColumn(index, -1);
+      });
+      const down = moveButton("▼", "Move down", index === columnPrefs.length - 1, function () {
+        moveColumn(index, 1);
+      });
+
+      item.addEventListener("dragstart", function (e) {
+        item.classList.add("dragging");
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", pref.key);
+      });
+      item.addEventListener("dragend", function () {
+        item.classList.remove("dragging");
+        item.draggable = false;
+        commitColumnOrder();
+      });
+
+      item.append(handle, checkbox, label, up, down);
+      els.columnsList.appendChild(item);
     });
+  }
+
+  function moveButton(glyph, title, disabled, onClick) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "column-move";
+    button.textContent = glyph;
+    button.title = title;
+    button.setAttribute("aria-label", title);
+    button.disabled = disabled;
+    button.addEventListener("click", onClick);
+    return button;
+  }
+
+  function moveColumn(index, delta) {
+    const target = index + delta;
+    if (target < 0 || target >= columnPrefs.length) return;
+    const moved = columnPrefs.splice(index, 1)[0];
+    columnPrefs.splice(target, 0, moved);
+    saveColumnPrefs();
+    applyColumnPrefs();
+    renderColumnsMenu();
+  }
+
+  // Reads the order the user dragged the rows into and persists it.
+  function commitColumnOrder() {
+    const byKey = {};
+    columnPrefs.forEach(function (pref) {
+      byKey[pref.key] = pref;
+    });
+    const ordered = Array.prototype.slice
+      .call(els.columnsList.querySelectorAll(".column-item"))
+      .map(function (item) {
+        return byKey[item.dataset.key];
+      })
+      .filter(Boolean);
+    if (ordered.length !== columnPrefs.length) return;
+    columnPrefs = ordered;
+    saveColumnPrefs();
+    applyColumnPrefs();
+  }
+
+  function columnAfterPoint(y) {
+    const items = Array.prototype.slice.call(
+      els.columnsList.querySelectorAll(".column-item:not(.dragging)")
+    );
+    let closest = { offset: Number.NEGATIVE_INFINITY, element: null };
+    items.forEach(function (item) {
+      const box = item.getBoundingClientRect();
+      const offset = y - box.top - box.height / 2;
+      if (offset < 0 && offset > closest.offset) closest = { offset: offset, element: item };
+    });
+    return closest.element;
+  }
+
+  els.columnsList.addEventListener("dragover", function (e) {
+    const dragging = els.columnsList.querySelector(".column-item.dragging");
+    if (!dragging) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const after = columnAfterPoint(e.clientY);
+    if (after === null) els.columnsList.appendChild(dragging);
+    else els.columnsList.insertBefore(dragging, after);
+  });
+
+  function showColumnsMenu() {
+    renderColumnsMenu();
+    els.columnsMenu.hidden = false;
+    els.columnsToggle.setAttribute("aria-expanded", "true");
+
+    const anchor = els.columnsToggle.getBoundingClientRect();
+    const menu = els.columnsMenu.getBoundingClientRect();
+    const left = Math.max(8, Math.min(anchor.right - menu.width, window.innerWidth - menu.width - 8));
+    let top = anchor.bottom + 6;
+    if (top + menu.height > window.innerHeight - 8) {
+      top = Math.max(8, anchor.top - menu.height - 6);
+    }
+    els.columnsMenu.style.left = left + "px";
+    els.columnsMenu.style.top = top + "px";
+  }
+
+  function hideColumnsMenu() {
+    els.columnsMenu.hidden = true;
+    els.columnsToggle.setAttribute("aria-expanded", "false");
+  }
+
+  function resetColumns() {
+    columnPrefs = COLUMN_DEFS.map(function (def) {
+      return { key: def.key, visible: true };
+    });
+    saveColumnPrefs();
+    applyColumnPrefs();
+    renderColumnsMenu();
   }
 
   function renderGrid(entries) {
@@ -924,7 +1213,12 @@
     buildMenu(x, y, globalMenuItems());
   }
 
-  document.addEventListener("click", hideContextMenu);
+  document.addEventListener("click", function (e) {
+    hideContextMenu();
+    if (!e.target.closest("#columns-menu") && !e.target.closest("#columns-toggle")) {
+      hideColumnsMenu();
+    }
+  });
 
   // The app always shows its own context menu and suppresses the browser's,
   // except inside text fields, where the native menu (copy/paste) is useful.
@@ -942,8 +1236,18 @@
     else showViewMenu(e.clientX, e.clientY);
   });
 
-  window.addEventListener("scroll", hideContextMenu, true);
-  window.addEventListener("resize", hideContextMenu);
+  window.addEventListener(
+    "scroll",
+    function () {
+      hideContextMenu();
+      hideColumnsMenu();
+    },
+    true
+  );
+  window.addEventListener("resize", function () {
+    hideContextMenu();
+    hideColumnsMenu();
+  });
 
   els.viewerDelete.addEventListener("click", function () {
     if (openEntry) deleteEntry(openEntry);
@@ -967,12 +1271,20 @@
     if (e.target === els.infoModal) closeInfo();
   });
 
+  els.columnsToggle.addEventListener("click", function () {
+    if (els.columnsMenu.hidden) showColumnsMenu();
+    else hideColumnsMenu();
+  });
+  els.columnsReset.addEventListener("click", resetColumns);
+
   els.viewerClose.addEventListener("click", closeViewer);
   els.viewer.addEventListener("click", function (e) {
     if (e.target === els.viewer && !editing) closeViewer();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && !els.infoModal.hidden) {
+    if (e.key === "Escape" && !els.columnsMenu.hidden) {
+      hideColumnsMenu();
+    } else if (e.key === "Escape" && !els.infoModal.hidden) {
       closeInfo();
     } else if (e.key === "Escape" && !els.viewer.hidden) {
       if (editing) cancelEdit();
@@ -998,20 +1310,22 @@
     }
   });
 
-  sortButtons.forEach(function (button) {
-    button.addEventListener("click", function () {
-      const key = button.dataset.key;
-      if (sortKey === key) {
-        sortDir = sortDir === "asc" ? "desc" : "asc";
-      } else {
-        sortKey = key;
-        // Size and Modified are most useful largest/newest first.
-        sortDir = key === "name" ? "asc" : "desc";
-      }
-      renderList();
-    });
+  // Sorting is delegated so the header can be rebuilt when columns change.
+  els.head.addEventListener("click", function (e) {
+    const button = e.target.closest("button.sort");
+    if (!button) return;
+    const key = button.dataset.key;
+    if (sortKey === key) {
+      sortDir = sortDir === "asc" ? "desc" : "asc";
+    } else {
+      sortKey = key;
+      // Size and Modified are most useful largest/newest first.
+      sortDir = key === "name" ? "asc" : "desc";
+    }
+    renderList();
   });
 
+  renderTableHead();
   applyView(viewMode);
   navigate(currentPath);
 })();

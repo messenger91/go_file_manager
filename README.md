@@ -11,7 +11,9 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Edit and save text files in the browser (the viewer's Edit button)
 - Rename files and folders (context menu, or the Rename button in the file viewer)
 - List and grid views, switchable from the top bar or the right-click context menu (remembered per browser)
+- Configurable list columns: show/hide and drag (or use ▲/▼) to reorder, remembered per browser
 - Filter the current folder and sort by name, size, or modified date
+- Responsive, mobile-first list (compact rows; the Modified column starts hidden on narrow screens)
 - Preview text files in the browser, download any file
 - Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
 - Login page with an in-memory session cookie (default `admin` / `admin`); HTTP Basic auth

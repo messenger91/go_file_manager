@@ -42,15 +42,18 @@
         aria-label="Filter files in this folder"
       >
       <span class="item-count" id="item-count" aria-live="polite"></span>
+      <button
+        id="columns-toggle"
+        class="btn"
+        type="button"
+        aria-haspopup="dialog"
+        aria-expanded="false"
+        aria-controls="columns-menu"
+      >Columns</button>
     </div>
     <table class="listing">
       <thead>
-        <tr>
-          <th><button type="button" class="sort" data-key="name">Name<span class="sort-arrow" aria-hidden="true"></span></button></th>
-          <th class="col-size"><button type="button" class="sort" data-key="size">Size<span class="sort-arrow" aria-hidden="true"></span></button></th>
-          <th class="col-time"><button type="button" class="sort" data-key="time">Modified<span class="sort-arrow" aria-hidden="true"></span></button></th>
-          <th class="col-actions"><span class="visually-hidden">Actions</span></th>
-        </tr>
+        <tr id="listing-head"></tr>
       </thead>
       <tbody id="listing-body"></tbody>
     </table>
@@ -77,6 +80,14 @@
   </div>
 
   <div class="context-menu" id="context-menu" role="menu" hidden></div>
+
+  <div class="columns-menu" id="columns-menu" role="dialog" aria-label="Columns" hidden>
+    <p class="columns-title">Columns</p>
+    <ul class="columns-list" id="columns-list"></ul>
+    <div class="columns-foot">
+      <button id="columns-reset" class="btn" type="button">Reset</button>
+    </div>
+  </div>
 
   <div class="modal" id="confirm-modal" hidden>
     <div
