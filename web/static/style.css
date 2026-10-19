@@ -435,6 +435,16 @@ body[data-view="list"] .size-toggle {
   fill: var(--folder-default);
 }
 
+/* Folder colour, chosen from the context menu and stored per path. */
+.folder-icon[data-color="red"] .folder-svg { fill: var(--folder-red); }
+.folder-icon[data-color="orange"] .folder-svg { fill: var(--folder-orange); }
+.folder-icon[data-color="yellow"] .folder-svg { fill: var(--folder-yellow); }
+.folder-icon[data-color="green"] .folder-svg { fill: var(--folder-green); }
+.folder-icon[data-color="teal"] .folder-svg { fill: var(--folder-teal); }
+.folder-icon[data-color="blue"] .folder-svg { fill: var(--folder-blue); }
+.folder-icon[data-color="purple"] .folder-svg { fill: var(--folder-purple); }
+.folder-icon[data-color="pink"] .folder-svg { fill: var(--folder-pink); }
+
 .pin-badge {
   flex: none;
 }

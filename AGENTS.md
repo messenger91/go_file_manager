@@ -114,7 +114,10 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   the `contextmenu` handler). `rekeyFolderPaths()` runs after a successful rename and
   `forgetFolderPaths()` after a delete so shortcuts and colours follow/expire with the
   subtree. Folders use an inline SVG (`renderEntryIcon()` + `FOLDER_SVG`) rather than the
-  📁 emoji so `--folder-<color>` can be applied; files keep their emoji.
+  📁 emoji so they can be coloured; files keep their emoji. The wrapper gets
+  `data-color="<key>"` and `.folder-icon[data-color="…"] .folder-svg` in the stylesheet
+  supplies the fill — the fill must not be set on the wrapper, because `.folder-svg`
+  declares its own `fill` on the `<svg>` and that rule wins over an inherited value.
 - Grid size is applied by `applyGridSize()` as a `size-s|m|l` class on `#grid` plus
   `aria-pressed` on the `.size-btn` buttons; the control is hidden in list view by
   `body[data-view="list"] .size-toggle`.

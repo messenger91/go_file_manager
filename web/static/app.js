@@ -486,10 +486,10 @@
     }
     const color = folderColor(entry.path);
     el.classList.add("folder-icon");
-    if (color) {
-      el.dataset.color = color;
-      el.style.fill = "var(--folder-" + color + ")";
-    }
+    if (color) el.dataset.color = color;
+    // The colour itself comes from `.folder-icon[data-color="…"] .folder-svg` in
+    // the stylesheet: a fill set on this wrapper would lose to the `fill`
+    // declared by `.folder-svg` on the <svg>.
     el.innerHTML = FOLDER_SVG;
   }
 
