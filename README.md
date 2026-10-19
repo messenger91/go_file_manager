@@ -8,6 +8,7 @@ previewing, editing, uploading, and deleting files under a single root folder.
 
 - Browse directories and view file metadata
 - Create folders and files, and upload files, from the right-click context menu
+  (icon per action, keyboard navigation, and a title showing the target)
 - Upload from the 📤 button in the top bar, which targets the folder you are viewing
   (the easy path on phones and tablets, where right-click is awkward)
 - Upload with a live progress bar and a Cancel button (50 MB limit, checked in the browser

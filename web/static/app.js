@@ -1268,34 +1268,82 @@
   }
 
   // --- right-click context menu ---
+  // Inline SVG icons inherit the item colour (including the danger red) and
+  // stay crisp at any zoom level.
+  const MENU_ICONS = {
+    open: '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    preview: '<path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="3"/>',
+    rename: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    download: '<path d="M12 4v11"/><path d="M7 10.5l5 5 5-5"/><path d="M5 20h14"/>',
+    delete: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/>',
+    newFolder: '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>',
+    newFile: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6M9 15h6"/>',
+    upload: '<path d="M12 20V9"/><path d="M7 13.5l5-5 5 5"/><path d="M5 4h14"/>',
+    list: '<path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
+    grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/>',
+    check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  };
+
+  // Element to refocus when the menu closes, if focus was inside the menu.
+  let contextReturnFocus = null;
+
   function hideContextMenu() {
+    if (els.contextMenu.hidden) return;
+    const hadFocus = els.contextMenu.contains(document.activeElement);
     els.contextMenu.hidden = true;
     els.contextMenu.textContent = "";
+    if (hadFocus && contextReturnFocus && contextReturnFocus.isConnected) {
+      contextReturnFocus.focus({ preventScroll: true });
+    }
+    contextReturnFocus = null;
+  }
+
+  function menuIcon(name, extraClass) {
+    const wrap = document.createElement("span");
+    wrap.className = "menu-icon" + (extraClass ? " " + extraClass : "");
+    wrap.setAttribute("aria-hidden", "true");
+    wrap.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+      'stroke-linecap="round" stroke-linejoin="round">' +
+      (MENU_ICONS[name] || "") +
+      "</svg>";
+    return wrap;
   }
 
   function viewMenuItems() {
     return [
-      { label: "List view", checked: viewMode === "list", action: function () { applyView("list"); } },
-      { label: "Grid view", checked: viewMode === "grid", action: function () { applyView("grid"); } },
+      { label: "List view", icon: "list", checked: viewMode === "list", action: function () { applyView("list"); } },
+      { label: "Grid view", icon: "grid", checked: viewMode === "grid", action: function () { applyView("grid"); } },
     ];
   }
 
   function globalMenuItems() {
     return [
-      { label: "New folder", action: function () { createFolder(); } },
-      { label: "New file", action: function () { createFile(); } },
-      { label: "Upload files…", action: function () { els.fileInput.click(); } },
+      { label: "New folder", icon: "newFolder", action: function () { createFolder(); } },
+      { label: "New file", icon: "newFile", action: function () { createFile(); } },
+      { label: "Upload files…", icon: "upload", action: function () { els.fileInput.click(); } },
       { separator: true },
     ]
       .concat(viewMenuItems())
       .concat([
         { separator: true },
-        { label: "Server info", action: function () { openInfo(); } },
+        { label: "Server info", icon: "info", action: function () { openInfo(); } },
       ]);
   }
 
-  function buildMenu(x, y, items) {
+  function buildMenu(x, y, items, title) {
+    hideContextMenu();
     els.contextMenu.textContent = "";
+
+    if (title) {
+      const heading = document.createElement("div");
+      heading.className = "context-title";
+      heading.textContent = title;
+      heading.title = title;
+      els.contextMenu.appendChild(heading);
+    }
+
     items.forEach(function (item) {
       if (item.separator) {
         const sep = document.createElement("div");
@@ -1308,7 +1356,16 @@
       button.className =
         "context-item" + (item.danger ? " danger" : "") + (item.checked ? " checked" : "");
       button.setAttribute("role", "menuitem");
-      button.textContent = (item.checked ? "✓ " : "") + item.label;
+      if (item.checked) button.setAttribute("aria-checked", "true");
+      button.appendChild(menuIcon(item.icon));
+
+      const label = document.createElement("span");
+      label.className = "menu-label";
+      label.textContent = item.label;
+      button.appendChild(label);
+
+      if (item.checked) button.appendChild(menuIcon("check", "menu-check"));
+
       button.addEventListener("click", function () {
         hideContextMenu();
         item.action();
@@ -1316,33 +1373,79 @@
       els.contextMenu.appendChild(button);
     });
 
+    contextReturnFocus = document.activeElement;
     els.contextMenu.hidden = false;
+
+    // Keep the menu fully on screen, including when it opens near the top or
+    // left edge, and let it scroll if it is taller than the viewport.
     const rect = els.contextMenu.getBoundingClientRect();
-    els.contextMenu.style.left = Math.min(x, window.innerWidth - rect.width - 8) + "px";
-    els.contextMenu.style.top = Math.min(y, window.innerHeight - rect.height - 8) + "px";
+    const left = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+    const top = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+    els.contextMenu.style.left = left + "px";
+    els.contextMenu.style.top = top + "px";
+
+    const first = els.contextMenu.querySelector(".context-item");
+    if (first) first.focus({ preventScroll: true });
   }
 
   function showContextMenu(x, y, entry) {
     const items = entry.isDir
       ? [
-          { label: "Open", action: function () { navigate(entry.path); } },
-          { label: "Rename", action: function () { renameEntry(entry); } },
-          { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
+          { label: "Open", icon: "open", action: function () { navigate(entry.path); } },
+          { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
+          { separator: true },
+          { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ]
       : [
-          { label: "Preview", action: function () { openFile(entry); } },
-          { label: "Rename", action: function () { renameEntry(entry); } },
-          { label: "Download", action: function () { downloadEntry(entry); } },
-          { label: "Delete", danger: true, action: function () { deleteEntry(entry); } },
+          { label: "Preview", icon: "preview", action: function () { openFile(entry); } },
+          { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
+          { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
+          { separator: true },
+          { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ];
     items.push({ separator: true });
     items.push.apply(items, globalMenuItems());
-    buildMenu(x, y, items);
+    buildMenu(x, y, items, entry.name);
   }
 
   function showViewMenu(x, y) {
-    buildMenu(x, y, globalMenuItems());
+    buildMenu(x, y, globalMenuItems(), currentPath);
   }
+
+  // Arrow keys move through the open menu, Home/End jump to its ends, and Tab
+  // dismisses it. Escape is handled by the global keydown listener.
+  els.contextMenu.addEventListener("keydown", function (e) {
+    const items = Array.prototype.slice.call(
+      els.contextMenu.querySelectorAll(".context-item")
+    );
+    if (items.length === 0) return;
+    const index = items.indexOf(document.activeElement);
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      items[index < 0 ? 0 : (index + 1) % items.length].focus();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      items[index < 0 ? items.length - 1 : (index - 1 + items.length) % items.length].focus();
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      items[0].focus();
+    } else if (e.key === "End") {
+      e.preventDefault();
+      items[items.length - 1].focus();
+    } else if (e.key === "Tab") {
+      hideContextMenu();
+    }
+  });
+
+  // The menu is anchored to the pointer, so it would drift on scroll or when
+  // the window resizes. Close it instead (unless the menu itself scrolls).
+  window.addEventListener("scroll", function (e) {
+    if (els.contextMenu.hidden) return;
+    if (e.target && e.target.nodeType === 1 && els.contextMenu.contains(e.target)) return;
+    hideContextMenu();
+  }, true);
+  window.addEventListener("resize", hideContextMenu);
 
   document.addEventListener("click", function (e) {
     hideContextMenu();
@@ -1428,7 +1531,9 @@
     if (e.target === els.viewer && !editing) closeViewer();
   });
   document.addEventListener("keydown", function (e) {
-    if (e.key === "Escape" && !els.uploadModal.hidden) {
+    if (e.key === "Escape" && !els.contextMenu.hidden) {
+      hideContextMenu();
+    } else if (e.key === "Escape" && !els.uploadModal.hidden) {
       if (uploadRequest) uploadRequest.abort();
       else closeUploadModal();
     } else if (e.key === "Escape" && !els.columnsMenu.hidden) {

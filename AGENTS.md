@@ -84,6 +84,14 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   "larger than the 50 MB limit" message (the limit is on the **whole multipart body**, so
   it includes MIME framing overhead).
 - No move endpoint yet (rename is same-folder only). Add it only against confirmed scope.
+- The context menu is built from item objects (`{label, icon, danger, checked, action}`
+  or `{separator: true}`) by `buildMenu()`; icons are inline SVG path strings in
+  `MENU_ICONS`, so they inherit `currentColor` (danger items go red) with no image files.
+  `showContextMenu`/`showViewMenu` add a `.context-title` (entry name, or the current
+  path). The menu clamps to the viewport on all four edges, scrolls when taller than the
+  screen, focuses its first item on open, supports ↑/↓/Home/End/Tab, and Escape closes it
+  and returns focus to wherever it was. It closes on scroll/resize because it is anchored
+  to the pointer.
 - The top bar's 📤 button (`#upload-toggle`) opens the file picker and uploads into the
   folder currently shown (`currentPath`), sharing the same modal/progress flow as the
   context-menu entry. It is the primary upload path on touch devices. All header controls
