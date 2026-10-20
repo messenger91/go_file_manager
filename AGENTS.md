@@ -107,6 +107,15 @@ Always run `make fmt vet test` before finishing; all three currently pass.
   (`s|m|l`). `pinnedFolders`/`folderColors`/`gridSize` are written with `saveStored()`
   (JSON) and read with `loadStored()`; `gridSize` is a plain string. `folderColor()`
   validates against `FOLDER_COLORS`, so a tampered entry cannot inject CSS.
+- Favorites are a fourth key, `favorites` (`[{path, name, isDir}]`, in add order). The ★ in
+  the header (`#favorites-toggle`, filled and gold via `.has-items`) opens the same menu
+  component anchored under the button (`showFavoritesMenu()`); its items carry a
+  `remove` callback that renders a trailing `.context-remove` button, and the empty state
+  is two `disabled` items. Toggling happens in the entry context menu for both files and
+  folders ("Add to favorites" / "Remove from favorites"). Favorites are marked with a
+  `.favorite-badge` in the list and a `.card-badges` corner on grid cards, and
+  `rekeyFolderPaths()`/`forgetFolderPaths()` keep them in step with rename/delete.
+  `buildMenu()` supports `{disabled, title, remove}` in addition to the item fields above.
 - Pinned folders render as a "Pinned" section above the current folder's entries (table:
   `sectionRow()` + `.pinned-row`; grid: `.grid-section` + `.pinned-card`), and
   `excludePinned()` keeps them out of the normal listing so nothing appears twice. A
@@ -134,8 +143,10 @@ Always run `make fmt vet test` before finishing; all three currently pass.
 - The top bar's 📤 button (`#upload-toggle`) opens the file picker and uploads into the
   folder currently shown (`currentPath`), sharing the same modal/progress flow as the
   context-menu entry. It is the primary upload path on touch devices. All header controls
-  are `flex: none`; below 600px the wordmark is hidden and icon buttons get 40px targets,
-  and below 380px the brand is dropped entirely so breadcrumbs keep the width.
+  are `flex: none`; below 600px the wordmark is hidden and icon buttons shrink to 36px
+  targets, and below 420px the brand (logo) is dropped too so the breadcrumbs keep the
+  width. The ★ favorites button is the sixth icon control, so these cutoffs matter: adding
+  another header control means re-checking 360px-wide layouts.
 - The list table's `<thead>` is built by `renderTableHead()` from `activeColumns()` in
   `app.js`; the Columns menu persists visibility + order in the `columns` localStorage key
   (`[[key, visible], …]`). Modified starts hidden below 640px (`defaultColumnPrefs`), at

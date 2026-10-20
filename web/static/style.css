@@ -11,6 +11,7 @@
   --folder-purple: #9165e0;
   --folder-pink: #d95fa3;
   --folder-default: #e0b04a;
+  --star: #e0b34a;
 }
 
 html[data-theme="light"] {
@@ -92,6 +93,25 @@ body {
   flex: none;
   font-size: 1.05rem;
   line-height: 1;
+}
+
+/* Header favorites star: outline when empty, filled when it has entries. */
+.favorites-toggle svg {
+  display: block;
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.favorites-toggle.has-items {
+  color: var(--star);
+}
+
+.favorites-toggle.has-items svg {
+  fill: currentColor;
 }
 
 .breadcrumbs {
@@ -455,11 +475,23 @@ body[data-view="list"] .size-toggle {
   color: var(--folder-default);
 }
 
-/* In grid cards the badge sits in the top-left corner, mirroring the actions. */
-.card .menu-icon.pin-badge {
+.menu-icon.favorite-badge {
+  width: 0.8rem;
+  height: 0.8rem;
+  color: var(--star);
+}
+
+/* Grid card badges sit in the top-left corner, mirroring the actions. */
+.card-badges {
   position: absolute;
   top: 0.45rem;
   left: 0.45rem;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.card-badges .menu-icon {
   width: 0.9rem;
   height: 0.9rem;
 }
@@ -642,6 +674,55 @@ body[data-view="list"] .size-toggle {
 
 .context-item.danger:hover {
   background: var(--danger-bg);
+}
+
+/* Favorites rows carry a trailing remove button. */
+.context-row {
+  display: flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+
+.context-row .context-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.context-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  margin-right: 0.2rem;
+  padding: 0;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.context-remove:hover,
+.context-remove:focus-visible {
+  color: var(--danger);
+  background: var(--danger-bg);
+  outline: none;
+}
+
+.context-remove .menu-icon {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.context-item:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.context-item:disabled:hover {
+  background: none;
 }
 
 .context-sep {
@@ -1230,6 +1311,11 @@ body[data-view="grid"] #columns-toggle {
     width: 1.75rem;
     height: 1.75rem;
   }
+
+  .context-remove {
+    width: 2.5rem;
+    height: 2.75rem;
+  }
 }
 
 @media (max-width: 600px) {
@@ -1237,10 +1323,10 @@ body[data-view="grid"] #columns-toggle {
     padding: 0.75rem;
   }
 
-  /* Make room for the upload button: drop the wordmark and tighten spacing. */
+  /* Make room for the header controls: drop the brand and tighten spacing. */
   .topbar {
-    gap: 0.4rem;
-    padding: 0.55rem 0.7rem;
+    gap: 0.3rem;
+    padding: 0.55rem 0.6rem;
   }
 
   .brand-name {
@@ -1256,9 +1342,9 @@ body[data-view="grid"] #columns-toggle {
   }
 
   .topbar .icon-btn {
-    min-width: 2.5rem;
-    min-height: 2.5rem;
-    padding: 0.4rem;
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+    padding: 0.35rem;
   }
   .toolbar {
     flex-wrap: wrap;
@@ -1280,8 +1366,8 @@ body[data-view="grid"] #columns-toggle {
   }
 }
 
-/* Very narrow phones: give the breadcrumbs every pixel available. */
-@media (max-width: 380px) {
+/* Narrow phones: the brand yields its space to the breadcrumbs. */
+@media (max-width: 420px) {
   .brand {
     display: none;
   }

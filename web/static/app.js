@@ -56,6 +56,7 @@
     memText: document.getElementById("mem-text"),
     viewToggle: document.getElementById("view-toggle"),
     uploadToggle: document.getElementById("upload-toggle"),
+    favoritesToggle: document.getElementById("favorites-toggle"),
     sizeToggle: document.getElementById("size-toggle"),
     grid: document.getElementById("grid"),
   };
@@ -253,6 +254,56 @@
   let folderColors = loadStored("folderColors", {});
   if (!folderColors || typeof folderColors !== "object") folderColors = {};
 
+  // Favorites (folders and files) are listed in the header for quick access.
+  let favorites = loadStored("favorites", []);
+  if (!Array.isArray(favorites)) favorites = [];
+  favorites = favorites
+    .filter(function (item) {
+      return item && typeof item.path === "string" && item.path !== "" && item.path !== "/";
+    })
+    .map(function (item) {
+      return {
+        path: item.path,
+        name: typeof item.name === "string" && item.name ? item.name : item.path.split("/").pop(),
+        isDir: !!item.isDir,
+      };
+    });
+
+  function isFavorite(path) {
+    return favorites.some(function (item) {
+      return item.path === path;
+    });
+  }
+
+  function updateFavoritesButton() {
+    els.favoritesToggle.classList.toggle("has-items", favorites.length > 0);
+    const label = favorites.length
+      ? "Favorites (" + favorites.length + ")"
+      : "Favorites (empty)";
+    els.favoritesToggle.setAttribute("aria-label", label);
+    els.favoritesToggle.title = label;
+  }
+
+  function toggleFavorite(entry) {
+    if (isFavorite(entry.path)) {
+      favorites = favorites.filter(function (item) {
+        return item.path !== entry.path;
+      });
+    } else {
+      favorites = favorites.concat([
+        { path: entry.path, name: entry.name, isDir: !!entry.isDir },
+      ]);
+    }
+    saveStored("favorites", favorites);
+    updateFavoritesButton();
+    renderList();
+    setStatus(
+      (isFavorite(entry.path) ? "Added " : "Removed ") + '"' + entry.name + '"' +
+        (isFavorite(entry.path) ? " to favorites." : " from favorites."),
+      false
+    );
+  }
+
   function isPinned(path) {
     return pinnedFolders.some(function (item) {
       return item.path === path;
@@ -290,14 +341,28 @@
     renderList();
   }
 
+  function removeFavorite(path) {
+    const item = favorites.find(function (entry) {
+      return entry.path === path;
+    });
+    if (!item) return;
+    favorites = favorites.filter(function (entry) {
+      return entry.path !== path;
+    });
+    saveStored("favorites", favorites);
+    updateFavoritesButton();
+    renderList();
+    setStatus('Removed "' + item.name + '" from favorites.', false);
+  }
+
   function remapPath(path, oldPath, newPath) {
     if (path === oldPath) return newPath;
     if (path.indexOf(oldPath + "/") === 0) return newPath + path.slice(oldPath.length);
     return path;
   }
 
-  // Renaming a folder moves it and its whole subtree, so pinned shortcuts and
-  // stored colours have to follow it.
+  // Renaming an entry moves it (and, for folders, its whole subtree), so pinned
+  // shortcuts, favorites and stored colours have to follow it.
   function rekeyFolderPaths(oldPath, newPath) {
     let pinsChanged = false;
     pinnedFolders = pinnedFolders.map(function (item) {
@@ -307,6 +372,18 @@
       return { path: mapped, name: mapped.split("/").pop() };
     });
     if (pinsChanged) saveStored("pinnedFolders", pinnedFolders);
+
+    let favoritesChanged = false;
+    favorites = favorites.map(function (item) {
+      const mapped = remapPath(item.path, oldPath, newPath);
+      if (mapped === item.path) return item;
+      favoritesChanged = true;
+      return { path: mapped, name: mapped.split("/").pop(), isDir: item.isDir };
+    });
+    if (favoritesChanged) {
+      saveStored("favorites", favorites);
+      updateFavoritesButton();
+    }
 
     let colorsChanged = false;
     const colors = {};
@@ -321,7 +398,8 @@
     }
   }
 
-  // Deleting a folder drops shortcuts and colours for it and its subtree.
+  // Deleting an entry drops shortcuts, favorites and colours for it and, when it
+  // is a folder, for its subtree.
   function forgetFolderPaths(path) {
     const keep = function (candidate) {
       return candidate !== path && candidate.indexOf(path + "/") !== 0;
@@ -332,6 +410,15 @@
       return keep(item.path);
     });
     if (pinnedFolders.length !== before) saveStored("pinnedFolders", pinnedFolders);
+
+    const favoritesBefore = favorites.length;
+    favorites = favorites.filter(function (item) {
+      return keep(item.path);
+    });
+    if (favorites.length !== favoritesBefore) {
+      saveStored("favorites", favorites);
+      updateFavoritesButton();
+    }
 
     let colorsChanged = false;
     Object.keys(folderColors).forEach(function (candidate) {
@@ -870,6 +957,11 @@
     }
   }
 
+  function appendEntryBadges(wrap, entry, pinned) {
+    if (pinned) wrap.appendChild(menuIcon("pin", "pin-badge"));
+    if (isFavorite(entry.path)) wrap.appendChild(menuIcon("star", "favorite-badge"));
+  }
+
   function renderCell(col, entry, pinned) {
     const td = document.createElement("td");
     td.className = COLUMN_CLASS[col.key];
@@ -884,7 +976,7 @@
       label.className = "name-label";
       label.textContent = entry.name;
       wrap.append(icon, label);
-      if (pinned) wrap.appendChild(menuIcon("pin", "pin-badge"));
+      appendEntryBadges(wrap, entry, pinned);
       td.appendChild(wrap);
     } else if (col.key === "size") {
       td.textContent = entry.isDir ? "—" : formatSize(entry.size);
@@ -1106,7 +1198,11 @@
     name.className = "card-name";
     name.textContent = entry.name;
     name.title = entry.name;
-    if (pinned) name.appendChild(menuIcon("pin", "pin-badge"));
+
+    const badges = document.createElement("span");
+    badges.className = "card-badges";
+    if (pinned) badges.appendChild(menuIcon("pin", "pin-badge"));
+    if (isFavorite(entry.path)) badges.appendChild(menuIcon("star", "favorite-badge"));
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
@@ -1138,6 +1234,7 @@
     actions.appendChild(deleteBtn);
 
     card.append(icon, name);
+    if (badges.childElementCount > 0) card.appendChild(badges);
     if (!entry.isDir) {
       const meta = document.createElement("div");
       meta.className = "card-meta";
@@ -1644,6 +1741,8 @@
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     pin: '<path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76z"/>',
+    star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/>',
+    close: '<path d="M6 6l12 12M18 6L6 18"/>',
   };
 
   // Element to refocus when the menu closes, if focus was inside the menu.
@@ -1654,6 +1753,7 @@
     const hadFocus = els.contextMenu.contains(document.activeElement);
     els.contextMenu.hidden = true;
     els.contextMenu.textContent = "";
+    els.favoritesToggle.setAttribute("aria-expanded", "false");
     if (hadFocus && contextReturnFocus && contextReturnFocus.isConnected) {
       contextReturnFocus.focus({ preventScroll: true });
     }
@@ -1708,6 +1808,33 @@
     return row;
   }
 
+  function favoriteMenuItems() {
+    if (favorites.length === 0) {
+      return [
+        { label: "No favorites yet", icon: "star", disabled: true },
+        { separator: true },
+        { label: "Right-click a file or folder to add it", icon: "info", disabled: true },
+      ];
+    }
+    return favorites.map(function (item) {
+      return {
+        label: item.name,
+        title: item.path,
+        icon: item.isDir ? "open" : "preview",
+        action: function () {
+          if (item.isDir) {
+            navigate(item.path);
+          } else {
+            openFile({ name: item.name, path: item.path, isDir: false, size: 0, modTime: "" });
+          }
+        },
+        remove: function () {
+          removeFavorite(item.path);
+        },
+      };
+    });
+  }
+
   function viewMenuItems() {
     return [
       { label: "List view", icon: "list", checked: viewMode === "list", action: function () { applyView("list"); } },
@@ -1757,6 +1884,7 @@
       button.className =
         "context-item" + (item.danger ? " danger" : "") + (item.checked ? " checked" : "");
       button.setAttribute("role", "menuitem");
+      if (item.title) button.title = item.title;
       if (item.checked) button.setAttribute("aria-checked", "true");
       button.appendChild(menuIcon(item.icon));
 
@@ -1767,11 +1895,38 @@
 
       if (item.checked) button.appendChild(menuIcon("check", "menu-check"));
 
-      button.addEventListener("click", function () {
+      if (item.disabled) {
+        button.disabled = true;
+        button.classList.add("is-disabled");
+      } else {
+        button.addEventListener("click", function () {
+          hideContextMenu();
+          item.action();
+        });
+      }
+
+      if (!item.remove) {
+        els.contextMenu.appendChild(button);
+        return;
+      }
+
+      // A row with a trailing remove button (used by the favorites menu).
+      const row = document.createElement("div");
+      row.className = "context-row";
+      row.appendChild(button);
+
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "context-remove";
+      remove.title = "Remove from favorites";
+      remove.setAttribute("aria-label", "Remove " + item.label + " from favorites");
+      remove.appendChild(menuIcon("close"));
+      remove.addEventListener("click", function () {
         hideContextMenu();
-        item.action();
+        item.remove();
       });
-      els.contextMenu.appendChild(button);
+      row.appendChild(remove);
+      els.contextMenu.appendChild(row);
     });
 
     contextReturnFocus = document.activeElement;
@@ -1785,15 +1940,21 @@
     els.contextMenu.style.left = left + "px";
     els.contextMenu.style.top = top + "px";
 
-    const first = els.contextMenu.querySelector(".context-item");
+    const first = els.contextMenu.querySelector(".context-item:not(:disabled)");
     if (first) first.focus({ preventScroll: true });
   }
 
   function showContextMenu(x, y, entry) {
+    const favoriteItem = {
+      label: isFavorite(entry.path) ? "Remove from favorites" : "Add to favorites",
+      icon: "star",
+      action: function () { toggleFavorite(entry); },
+    };
     const items = entry.isDir
       ? [
           { label: "Open", icon: "open", action: function () { navigate(entry.path); } },
           { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
+          favoriteItem,
           { separator: true },
           {
             label: isPinned(entry.path) ? "Unpin folder" : "Pin folder",
@@ -1811,6 +1972,7 @@
       : [
           { label: "Preview", icon: "preview", action: function () { openFile(entry); } },
           { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
+          favoriteItem,
           { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
           { separator: true },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
@@ -1818,17 +1980,39 @@
     items.push({ separator: true });
     items.push.apply(items, globalMenuItems());
     buildMenu(x, y, items, entry.name);
+    els.contextMenu.dataset.source = "entry";
   }
 
   function showViewMenu(x, y) {
     buildMenu(x, y, globalMenuItems(), currentPath);
+    els.contextMenu.dataset.source = "view";
   }
+
+  // The header star opens the same menu component as the context menu, anchored
+  // under the button.
+  function showFavoritesMenu() {
+    const rect = els.favoritesToggle.getBoundingClientRect();
+    buildMenu(rect.right, rect.bottom + 6, favoriteMenuItems(), "Favorites");
+    els.contextMenu.dataset.source = "favorites";
+    els.favoritesToggle.setAttribute("aria-expanded", "true");
+  }
+
+  els.favoritesToggle.addEventListener("click", function (e) {
+    // Stop propagation so the document click handler does not close the menu
+    // again right after it opens.
+    e.stopPropagation();
+    if (!els.contextMenu.hidden && els.contextMenu.dataset.source === "favorites") {
+      hideContextMenu();
+      return;
+    }
+    showFavoritesMenu();
+  });
 
   // Arrow keys move through the open menu, Home/End jump to its ends, and Tab
   // dismisses it. Escape is handled by the global keydown listener.
   els.contextMenu.addEventListener("keydown", function (e) {
     const items = Array.prototype.slice.call(
-      els.contextMenu.querySelectorAll(".context-item, .color-dot")
+      els.contextMenu.querySelectorAll(".context-item:not(:disabled), .color-dot, .context-remove")
     );
     if (items.length === 0) return;
     const index = items.indexOf(document.activeElement);
@@ -2010,6 +2194,7 @@
 
   renderTableHead();
   applyGridSize(gridSize);
+  updateFavoritesButton();
   applyView(viewMode);
   navigate(currentPath);
 })();

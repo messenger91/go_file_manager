@@ -22,6 +22,9 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Pin folders: pinned folders lead every listing in a "Pinned" section, so they are one click
   away from anywhere in the tree (remembered per browser; pins follow a rename and are
   dropped when the folder is deleted)
+- Favorites: star any file or folder from its context menu and reach it from the ★ button in
+  the header, which opens a quick list (folders open, files preview); remove entries from
+  that list or from the entry's context menu (remembered per browser)
 - Folder colours: pick one of eight swatches from a folder's context menu and its icon is
   drawn in that colour (remembered per browser)
 - Configurable list columns: show/hide and drag (or use ▲/▼) to reorder, remembered per browser
