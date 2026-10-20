@@ -49,7 +49,7 @@ func TestListSortsDirsFirst(t *testing.T) {
 	}
 
 	f := New(root)
-	_, entries, err := f.List("/")
+	_, entries, err := f.List("/", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +61,39 @@ func TestListSortsDirsFirst(t *testing.T) {
 	}
 	if entries[1].Path != "/aaa.txt" {
 		t.Errorf("second entry path = %q, want /aaa.txt", entries[1].Path)
+	}
+}
+
+func TestListHidesDotEntriesUnlessAsked(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"visible.txt", ".hidden", ".config"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	f := New(root)
+	_, visible, err := f.List("/", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 1 || visible[0].Name != "visible.txt" {
+		t.Fatalf("visible = %+v, want only visible.txt", visible)
+	}
+
+	_, all, err := f.List("/", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 4 {
+		t.Fatalf("want 4 entries with hidden files, got %d: %+v", len(all), all)
+	}
+	// Directories still sort first, dot directory included.
+	if !all[0].IsDir || all[0].Name != ".git" {
+		t.Errorf("first entry = %+v, want directory .git", all[0])
 	}
 }
 

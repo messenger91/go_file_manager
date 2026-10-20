@@ -104,7 +104,8 @@ func (f *FS) entry(name, rel string, info os.FileInfo) Entry {
 
 // List returns the cleaned relative path and the sorted contents of a
 // directory. Directories sort before files, then case-insensitively by name.
-func (f *FS) List(rel string) (string, []Entry, error) {
+// Dot entries are skipped unless showHidden is set.
+func (f *FS) List(rel string, showHidden bool) (string, []Entry, error) {
 	full, err := f.resolve(rel)
 	if err != nil {
 		return "", nil, err
@@ -117,6 +118,9 @@ func (f *FS) List(rel string) (string, []Entry, error) {
 	base := f.relOf(full)
 	entries := make([]Entry, 0, len(dir))
 	for _, d := range dir {
+		if !showHidden && strings.HasPrefix(d.Name(), ".") {
+			continue
+		}
 		info, err := d.Info()
 		if err != nil {
 			continue // e.g. broken symlink or permission error

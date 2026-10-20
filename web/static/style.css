@@ -95,10 +95,11 @@ body {
   line-height: 1;
 }
 
-/* Header tag, star and clock: stroke icons that inherit the button colour. */
+/* Header tag, star, clock and gear: stroke icons that inherit the button colour. */
 .tags-toggle svg,
 .favorites-toggle svg,
-.recent-toggle svg {
+.recent-toggle svg,
+.settings-toggle svg {
   display: block;
   width: 1.05rem;
   height: 1.05rem;
@@ -1419,9 +1420,9 @@ body[data-view="grid"] #columns-toggle {
   }
 }
 
-/* Narrow phones: eight icon controls leave too little room for the path, so
+/* Narrow phones: nine icon controls leave too little room for the path, so
    the controls take one row and the breadcrumbs the next. */
-@media (max-width: 460px) {
+@media (max-width: 520px) {
   .topbar {
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -1433,11 +1434,16 @@ body[data-view="grid"] #columns-toggle {
   }
 }
 
-/* The smallest phones: shave the controls and their gaps so all eight still
-   fit across 320px without overflowing. */
+/* The smallest phones: Server info moves into the settings menu (it is always
+   there), and the remaining controls shave a little so all eight still fit
+   across 320px without overflowing. */
 @media (max-width: 400px) {
   .topbar {
     gap: 0.2rem;
+  }
+
+  #info-toggle {
+    display: none;
   }
 
   .topbar .icon-btn {

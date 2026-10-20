@@ -64,6 +64,7 @@
     favoritesToggle: document.getElementById("favorites-toggle"),
     recentToggle: document.getElementById("recent-toggle"),
     tagsToggle: document.getElementById("tags-toggle"),
+    settingsToggle: document.getElementById("settings-toggle"),
     sizeToggle: document.getElementById("size-toggle"),
     grid: document.getElementById("grid"),
   };
@@ -261,6 +262,9 @@
   let folderColors = loadStored("folderColors", {});
   if (!folderColors || typeof folderColors !== "object") folderColors = {};
 
+  // Dot entries are hidden by default; the settings menu toggles them.
+  let showHidden = loadStored("showHidden", false) === true;
+
   // Favorites (folders and files) are listed in the header for quick access.
   let favorites = loadStored("favorites", []);
   if (!Array.isArray(favorites)) favorites = [];
@@ -369,11 +373,59 @@
     setStatus('Removed "' + item.name + '" from recent.', false);
   }
 
-  function clearRecent() {
+  // Clearing stored shortcuts is irreversible and one click away in two menus,
+  // so every clear action asks first.
+  async function clearRecentItems() {
+    const count = recent.length;
+    if (count === 0) return;
+    const ok = await confirmDialog({
+      title: "Clear recent",
+      message:
+        "Forget all " + count + " recent " + (count === 1 ? "item" : "items") +
+        "? This cannot be undone.",
+      confirmLabel: "Clear recent",
+    });
+    if (!ok) return;
     recent = [];
     saveStored("recent", recent);
     updateRecentButton();
-    setStatus("Cleared recent items.", false);
+    setStatus("Cleared " + count + " recent " + (count === 1 ? "item." : "items."), false);
+  }
+
+  async function clearFavorites() {
+    const count = favorites.length;
+    if (count === 0) return;
+    const ok = await confirmDialog({
+      title: "Clear favorites",
+      message:
+        "Remove all " + count + " " + (count === 1 ? "favorite" : "favorites") +
+        "? This cannot be undone.",
+      confirmLabel: "Clear favorites",
+    });
+    if (!ok) return;
+    favorites = [];
+    saveStored("favorites", favorites);
+    updateFavoritesButton();
+    renderList();
+    setStatus("Cleared " + count + " " + (count === 1 ? "favorite." : "favorites."), false);
+  }
+
+  async function clearTags() {
+    const count = taggedFolders().length;
+    if (count === 0) return;
+    const ok = await confirmDialog({
+      title: "Clear tags",
+      message:
+        "Remove the colour from " + count + " tagged " + (count === 1 ? "folder" : "folders") +
+        "? This cannot be undone.",
+      confirmLabel: "Clear tags",
+    });
+    if (!ok) return;
+    folderColors = {};
+    saveStored("folderColors", folderColors);
+    updateTagsButton();
+    renderList();
+    setStatus("Cleared " + count + " folder " + (count === 1 ? "tag." : "tags."), false);
   }
 
   function isPinned(path) {
@@ -480,6 +532,62 @@
     buildMenu(rect.right, rect.bottom + 6, tagMenuItems(), title);
     els.contextMenu.dataset.source = "tags";
     els.tagsToggle.setAttribute("aria-expanded", "true");
+  }
+
+  // --- settings: hidden entries + wiping this browser's shortcuts ---
+  function toggleHidden() {
+    showHidden = !showHidden;
+    saveStored("showHidden", showHidden);
+    // Same folder, so no new history entry or recent visit.
+    navigate(currentPath, { recordHistory: false, recordRecent: false });
+    setStatus(showHidden ? "Showing hidden folders and files." : "Hiding hidden folders and files.", false);
+  }
+
+  function settingsMenuItems() {
+    const tags = taggedFolders().length;
+    function clearLabel(name, count) {
+      return count ? name + " (" + count + ")" : name;
+    }
+    return [
+      {
+        label: "Show hidden files",
+        title: "Folders and files whose name starts with a dot",
+        icon: "eye",
+        checked: showHidden,
+        action: toggleHidden,
+      },
+      { separator: true },
+      { label: "Server info", icon: "info", action: function () { openInfo(); } },
+      { separator: true },
+      {
+        label: clearLabel("Clear tags", tags),
+        icon: "tag",
+        danger: true,
+        disabled: tags === 0,
+        action: clearTags,
+      },
+      {
+        label: clearLabel("Clear favorites", favorites.length),
+        icon: "star",
+        danger: true,
+        disabled: favorites.length === 0,
+        action: clearFavorites,
+      },
+      {
+        label: clearLabel("Clear recent", recent.length),
+        icon: "recent",
+        danger: true,
+        disabled: recent.length === 0,
+        action: clearRecentItems,
+      },
+    ];
+  }
+
+  function showSettingsMenu() {
+    const rect = els.settingsToggle.getBoundingClientRect();
+    buildMenu(rect.right, rect.bottom + 6, settingsMenuItems(), "Settings");
+    els.contextMenu.dataset.source = "settings";
+    els.settingsToggle.setAttribute("aria-expanded", "true");
   }
 
   function removeFavorite(path) {
@@ -636,10 +744,11 @@
     }
   }
 
-  async function api(endpoint, path) {
-    const res = await fetch(endpoint + "?path=" + encodeURIComponent(path), {
-      headers: { Accept: "application/json" },
-    });
+  async function api(endpoint, path, extra) {
+    const res = await fetch(
+      endpoint + "?path=" + encodeURIComponent(path) + (extra || ""),
+      { headers: { Accept: "application/json" } }
+    );
     ensureAuthorized(res);
     if (!res.ok) {
       let message = res.status + " " + res.statusText;
@@ -1013,7 +1122,8 @@
 
   function entryType(entry) {
     if (entry.isDir) return "Folder";
-    const ext = entry.name.includes(".") ? entry.name.split(".").pop().toLowerCase() : "";
+    const dot = entry.name.lastIndexOf(".");
+    const ext = dot > 0 ? entry.name.slice(dot + 1).toLowerCase() : "";
     if (!ext) return "File";
     const kind = FILE_TYPES[ext] || "File";
     return kind + " (." + ext + ")";
@@ -1541,7 +1651,7 @@
     setStatus("");
     closeViewer();
     try {
-      const data = await api("/api/list", path);
+      const data = await api("/api/list", path, showHidden ? "&hidden=1" : "");
       if (data.path !== currentPath) {
         filterText = "";
         els.filter.value = "";
@@ -1995,6 +2105,7 @@
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/>',
     properties: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
     tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
+    eye: '<path d="M2.5 12s3.6-6.5 9.5-6.5S21.5 12 21.5 12s-3.6 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     pin: '<path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76z"/>',
     star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/>',
@@ -2013,6 +2124,7 @@
     els.favoritesToggle.setAttribute("aria-expanded", "false");
     els.recentToggle.setAttribute("aria-expanded", "false");
     els.tagsToggle.setAttribute("aria-expanded", "false");
+    els.settingsToggle.setAttribute("aria-expanded", "false");
     if (hadFocus && contextReturnFocus && contextReturnFocus.isConnected) {
       contextReturnFocus.focus({ preventScroll: true });
     }
@@ -2120,7 +2232,7 @@
       };
     });
     items.push({ separator: true });
-    items.push({ label: "Clear recent", icon: "delete", danger: true, action: clearRecent });
+    items.push({ label: "Clear recent", icon: "delete", danger: true, action: clearRecentItems });
     return items;
   }
 
@@ -2318,6 +2430,15 @@
     els.contextMenu.dataset.source = "recent";
     els.recentToggle.setAttribute("aria-expanded", "true");
   }
+
+  els.settingsToggle.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (!els.contextMenu.hidden && els.contextMenu.dataset.source === "settings") {
+      hideContextMenu();
+      return;
+    }
+    showSettingsMenu();
+  });
 
   els.tagsToggle.addEventListener("click", function (e) {
     e.stopPropagation();

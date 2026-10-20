@@ -129,7 +129,8 @@ func (r *statusRecorder) Write(b []byte) (int, error) {
 // --- handlers -------------------------------------------------------------
 
 func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
-	rel, entries, err := s.fm.List(r.URL.Query().Get("path"))
+	showHidden := r.URL.Query().Get("hidden") == "1"
+	rel, entries, err := s.fm.List(r.URL.Query().Get("path"), showHidden)
 	if err != nil {
 		s.writeError(w, err)
 		return

@@ -216,6 +216,44 @@ func TestStatReportsEntryMetadata(t *testing.T) {
 	}
 }
 
+func TestListHidesDotEntriesUnlessRequested(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	for _, name := range []string{"visible.txt", ".hidden"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	list := func(query string) []string {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/list?path=/"+query, nil)
+		req.SetBasicAuth("admin", "secret")
+		rec := s.do(t, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+		}
+		var body struct {
+			Entries []files.Entry `json:"entries"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode list: %v", err)
+		}
+		names := make([]string, len(body.Entries))
+		for i, e := range body.Entries {
+			names[i] = e.Name
+		}
+		return names
+	}
+
+	if got := list(""); len(got) != 1 || got[0] != "visible.txt" {
+		t.Fatalf("default list = %v, want [visible.txt]", got)
+	}
+	if got := list("&hidden=1"); len(got) != 2 {
+		t.Fatalf("hidden list = %v, want both entries", got)
+	}
+}
+
 func TestInfoReportsVersionAndRoot(t *testing.T) {
 	s := newTestServer(t)
 	req := httptest.NewRequest("GET", "/api/info", nil)

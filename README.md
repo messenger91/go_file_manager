@@ -27,6 +27,8 @@ previewing, editing, uploading, and deleting files under a single root folder.
   that list or from the entry's context menu (remembered per browser)
 - Recent: the 🕘 button in the header lists the last 20 folders you visited and files you
   opened, newest first (folders open, files preview); remove one entry or clear the list
+- Settings: the ⚙ button in the header toggles hidden (dot) folders and files, opens
+  Server info, and clears tags, favorites or recent items in one confirmed step
 - Folder colours: pick one of eight swatches from a folder's context menu and its icon is
   drawn in that colour (remembered per browser)
 - Folder tags: the 🏷 button in the header groups every coloured folder by colour (one
@@ -236,7 +238,7 @@ redirected to `/login`. `POST /logout` ends the session.
 
 | Method | Path            | Description                          |
 | ------ | --------------- | ------------------------------------ |
-| GET    | `/api/list`     | List a directory (`?path=/sub`)      |
+| GET    | `/api/list`     | List a directory (`?path=/sub`; add `&hidden=1` for dot entries) |
 | GET    | `/api/metadata` | Metadata for one path (`/api/stat` is an alias) |
 | GET    | `/api/read`     | Text preview of a file (max 2 MiB)   |
 | GET    | `/api/download` | Raw file download                    |

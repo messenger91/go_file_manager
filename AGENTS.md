@@ -73,6 +73,8 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   **clamped into the root** (yields 404 for nonexistent paths), not rejected; symlink
   escapes that resolve outside the root return 403. Keep both behaviors.
 - `/api/read` refuses files over `files.MaxReadSize` (2 MiB) so callers download instead.
+  `/api/list` omits entries whose name starts with a dot unless `hidden=1` is passed; the
+  UI sends it only when the settings toggle is on (default: hidden).
 - Every mutation (delete, mkdir, rename, create, write, upload) uses `resolveTarget`
   (not `resolve`): it resolves the parent but never the final element, so operating on a
   symlink affects the link and leaves its target intact, even when the target is outside
@@ -138,6 +140,18 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `showRecentMenu()`, with per-row remove buttons and a trailing "Clear recent" danger
   item. Recent entries are not badged in the listing. Rename/delete rekey and prune them
   like favorites.
+- Settings: the ⚙ header button (`#settings-toggle`, `showSettingsMenu()`) opens
+  `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, a
+  "Server info" entry (so ℹ️ can be hidden on tiny screens), then Clear tags / Clear
+  favorites / Clear recent with counts (disabled at 0). Dot entries are hidden by default:
+  `showHidden` lives in localStorage, `navigate()` adds `&hidden=1` to `/api/list` when it
+  is on, and `files.List(rel, showHidden)` skips dot names server-side (so scripts see the
+  same default). Toggling re-fetches the current folder with
+  `{recordHistory: false, recordRecent: false}` so it neither grows history nor bumps
+  recent. Every clear action goes through `confirmDialog()` (the recent menu's "Clear
+  recent" included, via `clearRecentItems()`), then resets the array/object, saves it,
+  updates the matching header button and re-renders the list where badges or colours
+  changed. `clearLabels` show counts only when non-zero.
 - Properties: the context menu's "Properties" item (files and folders, right before
   Delete) calls `showProperties(entry)`. It opens `#properties-modal` immediately with the
   listing's data, then re-fetches `GET /api/metadata` to refresh it, so a folder listed
@@ -182,9 +196,10 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   folder currently shown (`currentPath`), sharing the same modal/progress flow as the
   context-menu entry. It is the primary upload path on touch devices. All header controls
   are `flex: none`; below 600px the wordmark is hidden and icon buttons shrink to 36px
-  targets, below 420px the brand (logo) is dropped, and below 460px `.topbar` wraps so the
-  nav (back arrow + breadcrumbs) gets its own row while the eight icon controls share the
-  first; below 400px those buttons shave to 34px so all eight still fit across 320px
+  targets, below 420px the brand (logo) is dropped, and below 520px `.topbar` wraps so the
+  nav (back arrow + breadcrumbs) gets its own row while the icon controls share the first.
+  Below 400px the ℹ️ button is hidden (Server info lives in the ⚙ settings menu, always)
+  and the remaining eight shave to 34px, so everything still fits across 320px
   (8×34 + 7×3.2 gap + 19.2 padding ≈ 314px). Re-check 320–400px layouts when adding
   another header control.
 - The list table's `<thead>` is built by `renderTableHead()` from `activeColumns()` in
