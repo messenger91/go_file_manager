@@ -234,7 +234,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | Method | Path            | Description                          |
 | ------ | --------------- | ------------------------------------ |
 | GET    | `/api/list`     | List a directory (`?path=/sub`)      |
-| GET    | `/api/stat`     | Metadata for one path                |
+| GET    | `/api/metadata` | Metadata for one path (`/api/stat` is an alias) |
 | GET    | `/api/read`     | Text preview of a file (max 2 MiB)   |
 | GET    | `/api/download` | Raw file download                    |
 | GET    | `/api/info`     | Version, root path, disk usage, host info |
@@ -263,6 +263,12 @@ request body (limit 8 MiB); the file must already exist. `POST /api/upload?path=
 accepts multipart form data with one or more `file` parts and never overwrites —
 each name that already exists is reported in the `failed` array. The whole upload is
 limited to 50 MiB; anything larger returns `413`.
+
+`GET /api/metadata?path=/file.txt` returns the same fields as a listing entry. It is
+also served as `GET /api/stat` for compatibility, but the UI uses `/api/metadata`:
+ad-blocker filter lists (EasyPrivacy and friends) contain the generic rule
+`/api/stat?`, which blocks the request in the browser and surfaces as
+`Failed to fetch`.
 
 ## Development
 

@@ -130,12 +130,18 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   like favorites.
 - Properties: the context menu's "Properties" item (files and folders, right before
   Delete) calls `showProperties(entry)`. It opens `#properties-modal` immediately with the
-  listing's data, then re-fetches `/api/stat` to refresh it, so a folder listed long ago
-  still shows the current size/mtime; a request counter (`propertiesRequest`) plus a
-  `hidden` check keep a slow response from overwriting a newer dialog. Rows are `dt`/`dd`
-  pairs in `#properties-list` (same `.info-list` styling as Server info); `FILE_TYPES`
-  maps common extensions to a friendly label, falling back to "File (.ext)", and folders
-  show "—" for size. It closes on the Close button, Escape or a backdrop click. The
+  listing's data, then re-fetches `GET /api/metadata` to refresh it, so a folder listed
+  long ago still shows the current size/mtime; a request counter (`propertiesRequest`)
+  plus a `hidden` check keep a slow response from overwriting a newer dialog. The refresh
+  is best-effort and silent on failure — everything shown is already valid — because the
+  dialog must not turn into an error. Use `/api/metadata`, **not** `/api/stat`, from the
+  browser: EasyPrivacy-style filter lists contain the generic rule `/api/stat?` and
+  ad blockers reject that request (`TypeError: Failed to fetch`). `/api/stat` stays as a
+  server-side alias for scripts. Rows are `dt`/`dd` pairs in `#properties-list` (same
+  `.info-list` styling as Server info); `FILE_TYPES` maps common extensions to a friendly
+  label, falling back to "File (.ext)", folders show "—" for size, and entries from
+  pins/favorites/recents (which only carry name/path/isDir) show "—" until the refresh
+  fills them in. It closes on the Close button, Escape or a backdrop click. The
   subtitle under a modal title is `.modal-subtitle` (shared with the Server info version
   line).
 - Pinned folders render as a "Pinned" section above the current folder's entries (table:

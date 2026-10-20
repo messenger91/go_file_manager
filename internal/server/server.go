@@ -46,6 +46,10 @@ func New(cfg *config.Config, fm *files.FS, web fs.FS, logger *log.Logger) *Serve
 func (s *Server) Handler() http.Handler {
 	app := http.NewServeMux()
 	app.HandleFunc("GET /api/list", s.handleList)
+	// /api/stat is kept as an alias for scripts; the UI uses /api/metadata
+	// because ad blockers match the generic filter rule "/api/stat?" and would
+	// otherwise make the browser reject the request ("Failed to fetch").
+	app.HandleFunc("GET /api/metadata", s.handleStat)
 	app.HandleFunc("GET /api/stat", s.handleStat)
 	app.HandleFunc("GET /api/read", s.handleRead)
 	app.HandleFunc("GET /api/download", s.handleDownload)

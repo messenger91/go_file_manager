@@ -955,6 +955,10 @@
   }
 
   function renderProperties(entry) {
+    // Pinned/favorite shortcuts only carry name, path and isDir until the
+    // refresh lands, so unknown values are shown as a dash instead of
+    // "Invalid Date" or a misleading 0 bytes.
+    const detailed = !!entry.modTime;
     els.propertiesName.textContent = entry.name;
     els.propertiesList.textContent = "";
     appendPropertyRow("Name", entry.name);
@@ -962,19 +966,23 @@
     appendPropertyRow("Type", entryType(entry));
     appendPropertyRow(
       "Size",
-      entry.isDir
+      entry.isDir || !detailed
         ? "—"
         : formatSize(entry.size) +
             " (" +
             entry.size.toLocaleString() +
             (entry.size === 1 ? " byte)" : " bytes)")
     );
-    appendPropertyRow("Modified", formatTime(entry.modTime));
+    appendPropertyRow("Modified", detailed ? formatTime(entry.modTime) : "—");
     if (entry.mode) appendPropertyRow("Permissions", entry.mode);
   }
 
-  // The listing data is shown immediately; /api/stat then refreshes it so the
-  // dialog is accurate even when the folder was loaded a while ago.
+  // The listing data is shown immediately; /api/metadata then refreshes it so
+  // the dialog is accurate even when the folder was loaded a while ago. The
+  // refresh is best-effort: everything shown is already valid without it, so a
+  // failure stays silent instead of turning a working dialog into an error.
+  // (/api/stat is an alias, but ad blockers match the filter rule "/api/stat?"
+  // and reject the request, hence the metadata name.)
   let propertiesRequest = 0;
 
   async function showProperties(entry) {
@@ -984,12 +992,12 @@
     els.propertiesClose.focus();
 
     try {
-      const fresh = await api("/api/stat", entry.path);
+      const fresh = await api("/api/metadata", entry.path);
       if (request === propertiesRequest && !els.propertiesModal.hidden) {
         renderProperties(fresh);
       }
-    } catch (err) {
-      setStatus("Failed to refresh properties: " + err.message, true);
+    } catch (_) {
+      /* keep the listing values; the dialog is complete without the refresh */
     }
   }
 

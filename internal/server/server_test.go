@@ -186,28 +186,33 @@ func TestStatReportsEntryMetadata(t *testing.T) {
 		t.Fatalf("write file: %v", err)
 	}
 
-	req := httptest.NewRequest("GET", "/api/stat?path=/note.txt", nil)
-	req.SetBasicAuth("admin", "secret")
-	rec := s.do(t, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
-	}
+	// /api/metadata is the primary route; /api/stat stays as an alias.
+	for _, endpoint := range []string{"/api/metadata", "/api/stat"} {
+		t.Run(endpoint, func(t *testing.T) {
+			req := httptest.NewRequest("GET", endpoint+"?path=/note.txt", nil)
+			req.SetBasicAuth("admin", "secret")
+			rec := s.do(t, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+			}
 
-	var entry files.Entry
-	if err := json.Unmarshal(rec.Body.Bytes(), &entry); err != nil {
-		t.Fatalf("decode entry: %v", err)
-	}
-	if entry.Name != "note.txt" || entry.Path != "/note.txt" {
-		t.Fatalf("name/path = %q/%q, want note.txt//note.txt", entry.Name, entry.Path)
-	}
-	if entry.IsDir {
-		t.Fatal("file reported as a directory")
-	}
-	if entry.Size != 5 {
-		t.Fatalf("size = %d, want 5", entry.Size)
-	}
-	if entry.Mode == "" || entry.ModTime.IsZero() {
-		t.Fatalf("mode/modTime missing: %+v", entry)
+			var entry files.Entry
+			if err := json.Unmarshal(rec.Body.Bytes(), &entry); err != nil {
+				t.Fatalf("decode entry: %v", err)
+			}
+			if entry.Name != "note.txt" || entry.Path != "/note.txt" {
+				t.Fatalf("name/path = %q/%q, want note.txt//note.txt", entry.Name, entry.Path)
+			}
+			if entry.IsDir {
+				t.Fatal("file reported as a directory")
+			}
+			if entry.Size != 5 {
+				t.Fatalf("size = %d, want 5", entry.Size)
+			}
+			if entry.Mode == "" || entry.ModTime.IsZero() {
+				t.Fatalf("mode/modTime missing: %+v", entry)
+			}
+		})
 	}
 }
 
