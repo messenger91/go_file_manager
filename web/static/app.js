@@ -49,6 +49,10 @@
     infoClose: document.getElementById("info-close"),
     infoVersion: document.getElementById("info-version"),
     infoList: document.getElementById("info-list"),
+    propertiesModal: document.getElementById("properties-modal"),
+    propertiesName: document.getElementById("properties-name"),
+    propertiesList: document.getElementById("properties-list"),
+    propertiesClose: document.getElementById("properties-close"),
     diskRow: document.getElementById("disk-row"),
     diskFill: document.getElementById("disk-fill"),
     diskText: document.getElementById("disk-text"),
@@ -920,6 +924,77 @@
 
   function closeInfo() {
     els.infoModal.hidden = true;
+  }
+
+  // --- file properties ---
+  const FILE_TYPES = {
+    png: "Image", jpg: "Image", jpeg: "Image", gif: "Image", svg: "Image",
+    webp: "Image", bmp: "Image", ico: "Image",
+    mp4: "Video", mkv: "Video", webm: "Video", mov: "Video", avi: "Video",
+    mp3: "Audio", wav: "Audio", flac: "Audio", ogg: "Audio", m4a: "Audio",
+    zip: "Archive", gz: "Archive", tar: "Archive", bz2: "Archive", xz: "Archive", "7z": "Archive",
+    pdf: "PDF document",
+    txt: "Text", md: "Text", log: "Text", json: "Text", yml: "Text", yaml: "Text",
+    js: "Text", ts: "Text", go: "Text", py: "Text", sh: "Text", css: "Text", html: "Text",
+  };
+
+  function entryType(entry) {
+    if (entry.isDir) return "Folder";
+    const ext = entry.name.includes(".") ? entry.name.split(".").pop().toLowerCase() : "";
+    if (!ext) return "File";
+    const kind = FILE_TYPES[ext] || "File";
+    return kind + " (." + ext + ")";
+  }
+
+  function appendPropertyRow(label, value) {
+    const dt = document.createElement("dt");
+    dt.textContent = label;
+    const dd = document.createElement("dd");
+    dd.textContent = value;
+    els.propertiesList.append(dt, dd);
+  }
+
+  function renderProperties(entry) {
+    els.propertiesName.textContent = entry.name;
+    els.propertiesList.textContent = "";
+    appendPropertyRow("Name", entry.name);
+    appendPropertyRow("Path", entry.path || "/");
+    appendPropertyRow("Type", entryType(entry));
+    appendPropertyRow(
+      "Size",
+      entry.isDir
+        ? "—"
+        : formatSize(entry.size) +
+            " (" +
+            entry.size.toLocaleString() +
+            (entry.size === 1 ? " byte)" : " bytes)")
+    );
+    appendPropertyRow("Modified", formatTime(entry.modTime));
+    if (entry.mode) appendPropertyRow("Permissions", entry.mode);
+  }
+
+  // The listing data is shown immediately; /api/stat then refreshes it so the
+  // dialog is accurate even when the folder was loaded a while ago.
+  let propertiesRequest = 0;
+
+  async function showProperties(entry) {
+    const request = ++propertiesRequest;
+    els.propertiesModal.hidden = false;
+    renderProperties(entry);
+    els.propertiesClose.focus();
+
+    try {
+      const fresh = await api("/api/stat", entry.path);
+      if (request === propertiesRequest && !els.propertiesModal.hidden) {
+        renderProperties(fresh);
+      }
+    } catch (err) {
+      setStatus("Failed to refresh properties: " + err.message, true);
+    }
+  }
+
+  function closeProperties() {
+    els.propertiesModal.hidden = true;
   }
 
   function emptyText() {
@@ -1837,6 +1912,7 @@
     list: '<path d="M8.5 6h12M8.5 12h12M8.5 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>',
     grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/>',
+    properties: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     pin: '<path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76z"/>',
     star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/>',
@@ -2097,6 +2173,7 @@
             onPick: function (color) { setFolderColor(entry, color); },
           },
           { separator: true },
+          { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ]
       : [
@@ -2105,6 +2182,7 @@
           favoriteItem,
           { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
           { separator: true },
+          { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ];
     items.push({ separator: true });
@@ -2271,6 +2349,11 @@
     if (e.target === els.infoModal) closeInfo();
   });
 
+  els.propertiesClose.addEventListener("click", closeProperties);
+  els.propertiesModal.addEventListener("click", function (e) {
+    if (e.target === els.propertiesModal) closeProperties();
+  });
+
   els.columnsToggle.addEventListener("click", function () {
     if (els.columnsMenu.hidden) showColumnsMenu();
     else hideColumnsMenu();
@@ -2300,6 +2383,8 @@
       hideColumnsMenu();
     } else if (e.key === "Escape" && !els.infoModal.hidden) {
       closeInfo();
+    } else if (e.key === "Escape" && !els.propertiesModal.hidden) {
+      closeProperties();
     } else if (e.key === "Escape" && !els.viewer.hidden) {
       if (editing) cancelEdit();
       else closeViewer();

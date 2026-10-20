@@ -36,6 +36,9 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Download a file straight from the list or grid: every file row and card gets a quick ⬇
   button (and the viewer's Download link carries the same icon)
 - Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
+- Properties dialog from the right-click context menu for any file or folder: name, path,
+  type, size in bytes and human units, modified date and permission bits, refreshed from
+  the server when it opens
 - Login page with an in-memory session cookie (default `admin` / `admin`); HTTP Basic auth
   still works for scripts and API clients
 - Server info popup from the header (disk/RAM usage meters + app version, hostname, OS,

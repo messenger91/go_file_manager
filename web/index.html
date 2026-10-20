@@ -165,7 +165,7 @@
       aria-labelledby="info-title"
     >
       <h2 class="modal-title" id="info-title">Server info</h2>
-      <p class="info-version" id="info-version" hidden></p>
+      <p class="modal-subtitle" id="info-version" hidden></p>
       <div class="usage" id="disk-row">
         <span class="usage-label">Disk</span>
         <div class="usage-bar"><div class="usage-bar-fill" id="disk-fill"></div></div>
@@ -179,6 +179,22 @@
       <dl class="info-list" id="info-list"></dl>
       <div class="modal-actions">
         <button id="info-close" class="btn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="properties-modal" hidden>
+    <div
+      class="modal-panel info-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="properties-title"
+    >
+      <h2 class="modal-title" id="properties-title">Properties</h2>
+      <p class="modal-subtitle" id="properties-name"></p>
+      <dl class="info-list" id="properties-list"></dl>
+      <div class="modal-actions">
+        <button id="properties-close" class="btn" type="button">Close</button>
       </div>
     </div>
   </div>

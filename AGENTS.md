@@ -128,6 +128,16 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `showRecentMenu()`, with per-row remove buttons and a trailing "Clear recent" danger
   item. Recent entries are not badged in the listing. Rename/delete rekey and prune them
   like favorites.
+- Properties: the context menu's "Properties" item (files and folders, right before
+  Delete) calls `showProperties(entry)`. It opens `#properties-modal` immediately with the
+  listing's data, then re-fetches `/api/stat` to refresh it, so a folder listed long ago
+  still shows the current size/mtime; a request counter (`propertiesRequest`) plus a
+  `hidden` check keep a slow response from overwriting a newer dialog. Rows are `dt`/`dd`
+  pairs in `#properties-list` (same `.info-list` styling as Server info); `FILE_TYPES`
+  maps common extensions to a friendly label, falling back to "File (.ext)", and folders
+  show "—" for size. It closes on the Close button, Escape or a backdrop click. The
+  subtitle under a modal title is `.modal-subtitle` (shared with the Server info version
+  line).
 - Pinned folders render as a "Pinned" section above the current folder's entries (table:
   `sectionRow()` + `.pinned-row`; grid: `.grid-section` + `.pinned-card`), and
   `excludePinned()` keeps them out of the normal listing so nothing appears twice. A
