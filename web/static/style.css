@@ -95,8 +95,9 @@ body {
   line-height: 1;
 }
 
-/* Header favorites star: outline when empty, filled when it has entries. */
-.favorites-toggle svg {
+/* Header favorites star and recent clock: stroke icons that inherit the button colour. */
+.favorites-toggle svg,
+.recent-toggle svg {
   display: block;
   width: 1.05rem;
   height: 1.05rem;
@@ -104,6 +105,7 @@ body {
   stroke: currentColor;
   stroke-width: 1.8;
   stroke-linejoin: round;
+  stroke-linecap: round;
 }
 
 .favorites-toggle.has-items {
@@ -1376,5 +1378,19 @@ body[data-view="grid"] #columns-toggle {
 @media (max-width: 420px) {
   .brand {
     display: none;
+  }
+}
+
+/* Very narrow phones: the icon controls take one row and the breadcrumbs the
+   next, so the path stays readable instead of being squeezed to nothing. */
+@media (max-width: 400px) {
+  .topbar {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .nav {
+    order: 2;
+    flex: 1 1 100%;
   }
 }

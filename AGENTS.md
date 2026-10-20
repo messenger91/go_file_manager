@@ -120,6 +120,14 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `.favorite-badge` in the list and a `.card-badges` corner on grid cards, and
   `rekeyFolderPaths()`/`forgetFolderPaths()` keep them in step with rename/delete.
   `buildMenu()` supports `{disabled, title, remove}` in addition to the item fields above.
+- Recent items use the `recent` key (`[{path, name, isDir}]`, newest first, max
+  `RECENT_LIMIT` = 20). `recordRecent()` runs after a successful `navigate()` (skipped for
+  the boot call via `{recordRecent: false}`) and at the start of `openFile()`, dedupes by
+  path and unshifts, so revisiting moves an entry to the top; the root is stored as
+  "Home". The 🕘 header button (`#recent-toggle`) opens `recentMenuItems()` via
+  `showRecentMenu()`, with per-row remove buttons and a trailing "Clear recent" danger
+  item. Recent entries are not badged in the listing. Rename/delete rekey and prune them
+  like favorites.
 - Pinned folders render as a "Pinned" section above the current folder's entries (table:
   `sectionRow()` + `.pinned-row`; grid: `.grid-section` + `.pinned-card`), and
   `excludePinned()` keeps them out of the normal listing so nothing appears twice. A
@@ -148,9 +156,9 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   folder currently shown (`currentPath`), sharing the same modal/progress flow as the
   context-menu entry. It is the primary upload path on touch devices. All header controls
   are `flex: none`; below 600px the wordmark is hidden and icon buttons shrink to 36px
-  targets, and below 420px the brand (logo) is dropped too so the breadcrumbs keep the
-  width. The ★ favorites button is the sixth icon control, so these cutoffs matter: adding
-  another header control means re-checking 360px-wide layouts.
+  targets, below 420px the brand (logo) is dropped, and below 400px `.topbar` wraps so the
+  nav (back arrow + breadcrumbs) gets its own row while the seven icon controls share the
+  first. Re-check 320–400px layouts when adding another header control.
 - The list table's `<thead>` is built by `renderTableHead()` from `activeColumns()` in
   `app.js`; the Columns menu persists visibility + order in the `columns` localStorage key
   (`[[key, visible], …]`). Modified starts hidden below 640px (`defaultColumnPrefs`), at

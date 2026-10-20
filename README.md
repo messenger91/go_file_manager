@@ -25,6 +25,8 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Favorites: star any file or folder from its context menu and reach it from the ★ button in
   the header, which opens a quick list (folders open, files preview); remove entries from
   that list or from the entry's context menu (remembered per browser)
+- Recent: the 🕘 button in the header lists the last 20 folders you visited and files you
+  opened, newest first (folders open, files preview); remove one entry or clear the list
 - Folder colours: pick one of eight swatches from a folder's context menu and its icon is
   drawn in that colour (remembered per browser)
 - Configurable list columns: show/hide and drag (or use ▲/▼) to reorder, remembered per browser

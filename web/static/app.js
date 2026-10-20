@@ -58,6 +58,7 @@
     viewToggle: document.getElementById("view-toggle"),
     uploadToggle: document.getElementById("upload-toggle"),
     favoritesToggle: document.getElementById("favorites-toggle"),
+    recentToggle: document.getElementById("recent-toggle"),
     sizeToggle: document.getElementById("size-toggle"),
     grid: document.getElementById("grid"),
   };
@@ -305,6 +306,71 @@
     );
   }
 
+  // Recent folders and files, newest first and capped at RECENT_LIMIT.
+  const RECENT_LIMIT = 20;
+
+  let recent = loadStored("recent", []);
+  if (!Array.isArray(recent)) recent = [];
+  recent = recent
+    .filter(function (item) {
+      return item && typeof item.path === "string" && item.path !== "";
+    })
+    .map(function (item) {
+      return {
+        path: item.path,
+        name: typeof item.name === "string" && item.name ? item.name : item.path.split("/").pop(),
+        isDir: !!item.isDir,
+      };
+    })
+    .slice(0, RECENT_LIMIT);
+
+  function pathName(path) {
+    return path === "/" ? "Home" : path.split("/").pop();
+  }
+
+  function updateRecentButton() {
+    els.recentToggle.classList.toggle("has-items", recent.length > 0);
+    const label = recent.length ? "Recent (" + recent.length + ")" : "Recent (empty)";
+    els.recentToggle.setAttribute("aria-label", label);
+    els.recentToggle.title = label;
+  }
+
+  // Visiting a folder or opening a file moves it to the top; the list never
+  // grows past RECENT_LIMIT and never holds the same path twice.
+  function recordRecent(entry) {
+    recent = recent.filter(function (item) {
+      return item.path !== entry.path;
+    });
+    recent.unshift({
+      path: entry.path,
+      name: entry.name || pathName(entry.path),
+      isDir: !!entry.isDir,
+    });
+    if (recent.length > RECENT_LIMIT) recent = recent.slice(0, RECENT_LIMIT);
+    saveStored("recent", recent);
+    updateRecentButton();
+  }
+
+  function removeRecent(path) {
+    const item = recent.find(function (entry) {
+      return entry.path === path;
+    });
+    if (!item) return;
+    recent = recent.filter(function (entry) {
+      return entry.path !== path;
+    });
+    saveStored("recent", recent);
+    updateRecentButton();
+    setStatus('Removed "' + item.name + '" from recent.', false);
+  }
+
+  function clearRecent() {
+    recent = [];
+    saveStored("recent", recent);
+    updateRecentButton();
+    setStatus("Cleared recent items.", false);
+  }
+
   function isPinned(path) {
     return pinnedFolders.some(function (item) {
       return item.path === path;
@@ -386,6 +452,18 @@
       updateFavoritesButton();
     }
 
+    let recentChanged = false;
+    recent = recent.map(function (item) {
+      const mapped = remapPath(item.path, oldPath, newPath);
+      if (mapped === item.path) return item;
+      recentChanged = true;
+      return { path: mapped, name: mapped.split("/").pop(), isDir: item.isDir };
+    });
+    if (recentChanged) {
+      saveStored("recent", recent);
+      updateRecentButton();
+    }
+
     let colorsChanged = false;
     const colors = {};
     Object.keys(folderColors).forEach(function (path) {
@@ -419,6 +497,15 @@
     if (favorites.length !== favoritesBefore) {
       saveStored("favorites", favorites);
       updateFavoritesButton();
+    }
+
+    const recentBefore = recent.length;
+    recent = recent.filter(function (item) {
+      return keep(item.path);
+    });
+    if (recent.length !== recentBefore) {
+      saveStored("recent", recent);
+      updateRecentButton();
     }
 
     let colorsChanged = false;
@@ -1310,6 +1397,9 @@
       currentPath = data.path;
       renderBreadcrumbs(data.path);
       renderEntries(data.entries);
+      if (!options || options.recordRecent !== false) {
+        recordRecent({ path: data.path, name: pathName(data.path), isDir: true });
+      }
     } catch (err) {
       setStatus("Failed to load " + path + ": " + err.message, true);
       renderEntries([]);
@@ -1321,6 +1411,7 @@
     cancelEdit();
     openEntry = entry;
     openFileEditable = false;
+    recordRecent(entry);
     els.viewer.hidden = false;
     els.viewerName.textContent = entry.name;
     els.viewerBody.textContent = "Loading…";
@@ -1749,6 +1840,7 @@
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     pin: '<path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76z"/>',
     star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/>',
+    recent: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
     close: '<path d="M6 6l12 12M18 6L6 18"/>',
   };
 
@@ -1761,6 +1853,7 @@
     els.contextMenu.hidden = true;
     els.contextMenu.textContent = "";
     els.favoritesToggle.setAttribute("aria-expanded", "false");
+    els.recentToggle.setAttribute("aria-expanded", "false");
     if (hadFocus && contextReturnFocus && contextReturnFocus.isConnected) {
       contextReturnFocus.focus({ preventScroll: true });
     }
@@ -1840,6 +1933,36 @@
         },
       };
     });
+  }
+
+  function recentMenuItems() {
+    if (recent.length === 0) {
+      return [
+        { label: "No recent items yet", icon: "recent", disabled: true },
+        { separator: true },
+        { label: "Folders you visit and files you open appear here", icon: "info", disabled: true },
+      ];
+    }
+    const items = recent.map(function (item) {
+      return {
+        label: item.name,
+        title: item.path,
+        icon: item.isDir ? "open" : "preview",
+        action: function () {
+          if (item.isDir) {
+            navigate(item.path);
+          } else {
+            openFile({ name: item.name, path: item.path, isDir: false, size: 0, modTime: "" });
+          }
+        },
+        remove: function () {
+          removeRecent(item.path);
+        },
+      };
+    });
+    items.push({ separator: true });
+    items.push({ label: "Clear recent", icon: "delete", danger: true, action: clearRecent });
+    return items;
   }
 
   function viewMenuItems() {
@@ -2003,6 +2126,23 @@
     els.contextMenu.dataset.source = "favorites";
     els.favoritesToggle.setAttribute("aria-expanded", "true");
   }
+
+  function showRecentMenu() {
+    const rect = els.recentToggle.getBoundingClientRect();
+    const title = recent.length ? "Recent (" + recent.length + ")" : "Recent";
+    buildMenu(rect.right, rect.bottom + 6, recentMenuItems(), title);
+    els.contextMenu.dataset.source = "recent";
+    els.recentToggle.setAttribute("aria-expanded", "true");
+  }
+
+  els.recentToggle.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (!els.contextMenu.hidden && els.contextMenu.dataset.source === "recent") {
+      hideContextMenu();
+      return;
+    }
+    showRecentMenu();
+  });
 
   els.favoritesToggle.addEventListener("click", function (e) {
     // Stop propagation so the document click handler does not close the menu
@@ -2202,6 +2342,7 @@
   renderTableHead();
   applyGridSize(gridSize);
   updateFavoritesButton();
+  updateRecentButton();
   applyView(viewMode);
-  navigate(currentPath);
+  navigate(currentPath, { recordRecent: false });
 })();
