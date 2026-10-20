@@ -33,7 +33,9 @@ Tests live in `internal/files` (root confinement, symlink escapes, listing order
 safety) and `internal/server` (login/session flow, auth redirects, logout);
 `internal/config` has none.
 
-Always run `make fmt vet test` before finishing; all three currently pass.
+Always run `make fmt vet test` before finishing; all three currently pass. **Bump the version**
+in `internal/version/version.go` with every change — minor for a feature, patch for a fix
+(major for a breaking change) — since the Server info dialog and the startup log show it.
 
 ## Layout
 
@@ -48,6 +50,8 @@ Always run `make fmt vet test` before finishing; all three currently pass.
 - `internal/host` — host info for `GET /api/info` (hostname, OS name, arch, uptime, load
   average, memory). Read from `/proc` and `/etc/os-release`; unavailable values are left
   zero, so it compiles and runs on any OS.
+- `internal/version` — the application version constant, reported by `GET /api/info`,
+  shown in the Server info dialog and logged at startup.
 - `web/` — static UI (`index.html`, `login.html`, `static/style.css`, `static/app.js`).
   **Assets are embedded at build time**, so edits require a rebuild/restart, not just a
   refresh.

@@ -47,6 +47,7 @@
     infoToggle: document.getElementById("info-toggle"),
     infoModal: document.getElementById("info-modal"),
     infoClose: document.getElementById("info-close"),
+    infoVersion: document.getElementById("info-version"),
     infoList: document.getElementById("info-list"),
     diskRow: document.getElementById("disk-row"),
     diskFill: document.getElementById("disk-fill"),
@@ -726,6 +727,8 @@
       els.diskRow.hidden = true;
       els.memRow.hidden = true;
       els.infoList.textContent = "";
+      els.infoVersion.hidden = true;
+      els.infoVersion.textContent = "";
       appendInfoRow("Error", err.message);
       return;
     }
@@ -733,6 +736,10 @@
   }
 
   function renderServerInfo(info) {
+    const label = info && info.version ? "Go File Manager " + info.version : "";
+    els.infoVersion.textContent = label;
+    els.infoVersion.hidden = !label;
+
     const disk = info && info.disk;
     if (disk && disk.totalBytes) {
       const used = disk.usedBytes || 0;

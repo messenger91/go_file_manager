@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 
 	"go_file_manager/internal/config"
 	"go_file_manager/internal/files"
+	"go_file_manager/internal/version"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -173,5 +175,35 @@ func TestSafeNextBlocksOpenRedirects(t *testing.T) {
 		if got := safeNext(in); got != want {
 			t.Errorf("safeNext(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestInfoReportsVersionAndRoot(t *testing.T) {
+	s := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/info", nil)
+	req.SetBasicAuth("admin", "secret")
+
+	rec := s.do(t, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var info struct {
+		Version string         `json:"version"`
+		Root    string         `json:"root"`
+		Disk    map[string]any `json:"disk"`
+		Host    map[string]any `json:"host"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &info); err != nil {
+		t.Fatalf("decode info: %v", err)
+	}
+	if info.Version != version.Version {
+		t.Fatalf("version = %q, want %q", info.Version, version.Version)
+	}
+	if info.Root == "" {
+		t.Fatal("root is empty")
+	}
+	if info.Disk == nil || info.Host == nil {
+		t.Fatalf("disk/host missing: %+v", info)
 	}
 }

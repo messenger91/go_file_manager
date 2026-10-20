@@ -1269,6 +1269,12 @@ body[data-view="grid"] #columns-toggle {
   width: min(520px, 100%);
 }
 
+.info-version {
+  margin: -0.1rem 0 0.9rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
 .info-list {
   display: grid;
   grid-template-columns: auto 1fr;

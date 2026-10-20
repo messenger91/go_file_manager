@@ -12,6 +12,7 @@ import (
 	"go_file_manager/internal/config"
 	"go_file_manager/internal/files"
 	"go_file_manager/internal/server"
+	"go_file_manager/internal/version"
 )
 
 //go:embed all:web
@@ -41,7 +42,7 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	logger.Printf("Go File Manager rooted at %q, listening on http://localhost%s (user %q)", cfg.HomeDir, addr, cfg.Admin)
+	logger.Printf("Go File Manager %s rooted at %q, listening on http://localhost%s (user %q)", version.Version, cfg.HomeDir, addr, cfg.Admin)
 	if err := httpServer.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Fatalf("server: %v", err)
 	}

@@ -36,8 +36,8 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Delete files and folders (row button or right-click context menu, with an in-app confirmation dialog)
 - Login page with an in-memory session cookie (default `admin` / `admin`); HTTP Basic auth
   still works for scripts and API clients
-- Server info popup from the header (disk/RAM usage meters + hostname, OS, uptime, load
-  average, CPU, Go version)
+- Server info popup from the header (disk/RAM usage meters + app version, hostname, OS,
+  uptime, load average, CPU, Go version)
 - Light and dark theme (remembered per browser)
 - Access confined to `HOME_DIR`; traversal is clamped into the root and symlink escapes are rejected
 
@@ -232,7 +232,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | GET    | `/api/stat`     | Metadata for one path                |
 | GET    | `/api/read`     | Text preview of a file (max 2 MiB)   |
 | GET    | `/api/download` | Raw file download                    |
-| GET    | `/api/info`     | Root path, disk usage, host info      |
+| GET    | `/api/info`     | Version, root path, disk usage, host info |
 | DELETE | `/api/delete`   | Delete a file or folder              |
 | POST   | `/api/mkdir`    | Create a folder                      |
 | POST   | `/api/rename`   | Rename a file or folder in place     |
@@ -266,3 +266,8 @@ make test   # go test ./...
 make vet    # go vet ./...
 make fmt    # go fmt ./...
 ```
+
+The version lives in `internal/version/version.go`. It is logged at startup, returned by
+`GET /api/info` and shown in the Server info dialog, so it is the only place to edit. Bump
+it with every change — minor for a new feature, patch for a fix (major for a breaking
+change) — and keep it plain `MAJOR.MINOR.PATCH`; a test enforces that shape.
