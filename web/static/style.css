@@ -95,7 +95,8 @@ body {
   line-height: 1;
 }
 
-/* Header favorites star and recent clock: stroke icons that inherit the button colour. */
+/* Header tag, star and clock: stroke icons that inherit the button colour. */
+.tags-toggle svg,
 .favorites-toggle svg,
 .recent-toggle svg {
   display: block;
@@ -614,6 +615,39 @@ body[data-view="list"] .size-toggle {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Tag headings in the folder-tags menu: a colour dot, the colour name and a
+   count, aligned with the icon column of the items below. */
+.context-group {
+  display: grid;
+  grid-template-columns: 1.1rem 1fr auto;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem 0.15rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.context-group .color-dot {
+  width: 0.8rem;
+  height: 0.8rem;
+  justify-self: center;
+  cursor: default;
+}
+
+.context-group .color-dot:hover {
+  transform: none;
+}
+
+.context-count {
+  font-weight: 400;
+  letter-spacing: 0;
 }
 
 .context-item {
@@ -1385,9 +1419,9 @@ body[data-view="grid"] #columns-toggle {
   }
 }
 
-/* Very narrow phones: the icon controls take one row and the breadcrumbs the
-   next, so the path stays readable instead of being squeezed to nothing. */
-@media (max-width: 400px) {
+/* Narrow phones: eight icon controls leave too little room for the path, so
+   the controls take one row and the breadcrumbs the next. */
+@media (max-width: 460px) {
   .topbar {
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -1396,5 +1430,19 @@ body[data-view="grid"] #columns-toggle {
   .nav {
     order: 2;
     flex: 1 1 100%;
+  }
+}
+
+/* The smallest phones: shave the controls and their gaps so all eight still
+   fit across 320px without overflowing. */
+@media (max-width: 400px) {
+  .topbar {
+    gap: 0.2rem;
+  }
+
+  .topbar .icon-btn {
+    min-width: 2.125rem;
+    min-height: 2.125rem;
+    padding: 0.3rem;
   }
 }

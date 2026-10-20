@@ -29,6 +29,9 @@ previewing, editing, uploading, and deleting files under a single root folder.
   opened, newest first (folders open, files preview); remove one entry or clear the list
 - Folder colours: pick one of eight swatches from a folder's context menu and its icon is
   drawn in that colour (remembered per browser)
+- Folder tags: the 🏷 button in the header groups every coloured folder by colour (one
+  colour = one tag, with the folder count per tag), so tagged folders are one click away
+  from anywhere; click a folder in the list to open it
 - Configurable list columns: show/hide and drag (or use ▲/▼) to reorder, remembered per browser
 - Filter the current folder and sort by name, size, or modified date
 - Responsive, mobile-first list (compact rows; the Modified column starts hidden on narrow screens)

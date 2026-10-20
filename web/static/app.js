@@ -63,6 +63,7 @@
     uploadToggle: document.getElementById("upload-toggle"),
     favoritesToggle: document.getElementById("favorites-toggle"),
     recentToggle: document.getElementById("recent-toggle"),
+    tagsToggle: document.getElementById("tags-toggle"),
     sizeToggle: document.getElementById("size-toggle"),
     grid: document.getElementById("grid"),
   };
@@ -410,6 +411,75 @@
     else delete folderColors[entry.path];
     saveStored("folderColors", folderColors);
     renderList();
+    updateTagsButton();
+  }
+
+  // Colored folders are the tags: the header groups them by palette colour, so
+  // one colour is one tag.
+  function taggedFolders() {
+    return Object.keys(folderColors).filter(function (path) {
+      return FOLDER_COLORS.indexOf(folderColors[path]) !== -1;
+    });
+  }
+
+  function updateTagsButton() {
+    const count = taggedFolders().length;
+    els.tagsToggle.classList.toggle("has-items", count > 0);
+    const label = count ? "Folder tags (" + count + ")" : "Folder tags (empty)";
+    els.tagsToggle.setAttribute("aria-label", label);
+    els.tagsToggle.title = label;
+  }
+
+  function tagMenuItems() {
+    const tagged = taggedFolders();
+    if (tagged.length === 0) {
+      return [
+        { label: "No colored folders yet", icon: "tag", disabled: true },
+        { separator: true },
+        { label: "Pick a colour from a folder's context menu", icon: "info", disabled: true },
+      ];
+    }
+
+    const items = [];
+    FOLDER_COLORS.forEach(function (color) {
+      const folders = tagged
+        .filter(function (path) {
+          return folderColors[path] === color;
+        })
+        .map(function (path) {
+          return { path: path, name: pathName(path) };
+        })
+        .sort(function (a, b) {
+          return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+        });
+      if (folders.length === 0) return;
+
+      items.push({
+        group: color.charAt(0).toUpperCase() + color.slice(1),
+        color: color,
+        count: folders.length,
+      });
+      folders.forEach(function (folder) {
+        items.push({
+          label: folder.name,
+          title: folder.path,
+          icon: "open",
+          action: function () {
+            navigate(folder.path);
+          },
+        });
+      });
+    });
+    return items;
+  }
+
+  function showTagsMenu() {
+    const rect = els.tagsToggle.getBoundingClientRect();
+    const count = taggedFolders().length;
+    const title = count ? "Folder tags (" + count + ")" : "Folder tags";
+    buildMenu(rect.right, rect.bottom + 6, tagMenuItems(), title);
+    els.contextMenu.dataset.source = "tags";
+    els.tagsToggle.setAttribute("aria-expanded", "true");
   }
 
   function removeFavorite(path) {
@@ -519,7 +589,10 @@
         colorsChanged = true;
       }
     });
-    if (colorsChanged) saveStored("folderColors", folderColors);
+    if (colorsChanged) {
+      saveStored("folderColors", folderColors);
+      updateTagsButton();
+    }
   }
 
   // --- helpers ---
@@ -1921,6 +1994,7 @@
     grid: '<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><path d="M12 7.5h.01"/>',
     properties: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
+    tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     pin: '<path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76z"/>',
     star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/>',
@@ -1938,6 +2012,7 @@
     els.contextMenu.textContent = "";
     els.favoritesToggle.setAttribute("aria-expanded", "false");
     els.recentToggle.setAttribute("aria-expanded", "false");
+    els.tagsToggle.setAttribute("aria-expanded", "false");
     if (hadFocus && contextReturnFocus && contextReturnFocus.isConnected) {
       contextReturnFocus.focus({ preventScroll: true });
     }
@@ -2089,6 +2164,29 @@
         els.contextMenu.appendChild(sep);
         return;
       }
+      if (item.group) {
+        const heading = document.createElement("div");
+        heading.className = "context-group";
+        heading.setAttribute("role", "presentation");
+        if (item.color) {
+          const dot = document.createElement("span");
+          dot.className = "color-dot";
+          dot.style.background = "var(--folder-" + item.color + ")";
+          heading.appendChild(dot);
+        }
+        const label = document.createElement("span");
+        label.className = "menu-label";
+        label.textContent = item.group;
+        heading.appendChild(label);
+        if (item.count) {
+          const count = document.createElement("span");
+          count.className = "context-count";
+          count.textContent = String(item.count);
+          heading.appendChild(count);
+        }
+        els.contextMenu.appendChild(heading);
+        return;
+      }
       if (item.swatches) {
         els.contextMenu.appendChild(colorRow(item.current, item.onPick));
         return;
@@ -2221,6 +2319,15 @@
     els.recentToggle.setAttribute("aria-expanded", "true");
   }
 
+  els.tagsToggle.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (!els.contextMenu.hidden && els.contextMenu.dataset.source === "tags") {
+      hideContextMenu();
+      return;
+    }
+    showTagsMenu();
+  });
+
   els.recentToggle.addEventListener("click", function (e) {
     e.stopPropagation();
     if (!els.contextMenu.hidden && els.contextMenu.dataset.source === "recent") {
@@ -2245,7 +2352,9 @@
   // dismisses it. Escape is handled by the global keydown listener.
   els.contextMenu.addEventListener("keydown", function (e) {
     const items = Array.prototype.slice.call(
-      els.contextMenu.querySelectorAll(".context-item:not(:disabled), .color-dot, .context-remove")
+      els.contextMenu.querySelectorAll(
+        ".context-item:not(:disabled), button.color-dot, .context-remove"
+      )
     );
     if (items.length === 0) return;
     const index = items.indexOf(document.activeElement);
@@ -2436,6 +2545,7 @@
   applyGridSize(gridSize);
   updateFavoritesButton();
   updateRecentButton();
+  updateTagsButton();
   applyView(viewMode);
   navigate(currentPath, { recordRecent: false });
 })();

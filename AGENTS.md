@@ -110,7 +110,17 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   (`[{path, name}]`, in pin order), `folderColors` (`{path: colorKey}`) and `gridSize`
   (`s|m|l`). `pinnedFolders`/`folderColors`/`gridSize` are written with `saveStored()`
   (JSON) and read with `loadStored()`; `gridSize` is a plain string. `folderColor()`
-  validates against `FOLDER_COLORS`, so a tampered entry cannot inject CSS.
+  validates against `FOLDER_COLORS`, so a tampered entry cannot inject CSS. The 🏷 header
+  button (`#tags-toggle`, `showTagsMenu()`) turns colours into tags: one group per palette
+  colour, in `FOLDER_COLORS` order, listing each coloured folder (name from `pathName()`,
+  sorted case-insensitively, path as the tooltip) so a click navigates there. Groups are
+  rendered by `buildMenu()` from `{group, color, count}` items as non-interactive
+  `.context-group` headings (a dot, the colour name and a `.context-count`), so keyboard
+  navigation targets `button.color-dot` only. `updateTagsButton()` keeps the header count
+  in step and is called by `setFolderColor()`, `forgetFolderPaths()` and on boot; the
+  rekey/forget helpers already keep `folderColors` in step with renames and deletes.
+  Only palette-valid colours are listed, so tampered storage entries are ignored, and the
+  empty state is two `disabled` hints.
 - Favorites are a fourth key, `favorites` (`[{path, name, isDir}]`, in add order). The ★ in
   the header (`#favorites-toggle`, filled and gold via `.has-items`) opens the same menu
   component anchored under the button (`showFavoritesMenu()`); its items carry a
@@ -172,9 +182,11 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   folder currently shown (`currentPath`), sharing the same modal/progress flow as the
   context-menu entry. It is the primary upload path on touch devices. All header controls
   are `flex: none`; below 600px the wordmark is hidden and icon buttons shrink to 36px
-  targets, below 420px the brand (logo) is dropped, and below 400px `.topbar` wraps so the
-  nav (back arrow + breadcrumbs) gets its own row while the seven icon controls share the
-  first. Re-check 320–400px layouts when adding another header control.
+  targets, below 420px the brand (logo) is dropped, and below 460px `.topbar` wraps so the
+  nav (back arrow + breadcrumbs) gets its own row while the eight icon controls share the
+  first; below 400px those buttons shave to 34px so all eight still fit across 320px
+  (8×34 + 7×3.2 gap + 19.2 padding ≈ 314px). Re-check 320–400px layouts when adding
+  another header control.
 - The list table's `<thead>` is built by `renderTableHead()` from `activeColumns()` in
   `app.js`; the Columns menu persists visibility + order in the `columns` localStorage key
   (`[[key, visible], …]`). Modified starts hidden below 640px (`defaultColumnPrefs`), at
