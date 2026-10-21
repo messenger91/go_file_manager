@@ -226,6 +226,23 @@
     </div>
   </div>
 
+  <div class="modal" id="move-modal" hidden>
+    <div class="modal-panel move-panel" role="dialog" aria-modal="true" aria-labelledby="move-title">
+      <h2 class="modal-title" id="move-title">Move</h2>
+      <p class="modal-subtitle" id="move-name"></p>
+      <div class="move-dest">
+        <span class="move-dest-label">Destination</span>
+        <span class="move-path" id="move-path"></span>
+      </div>
+      <div class="move-list" id="move-list" role="group" aria-label="Folders"></div>
+      <p class="move-hint" id="move-hint"></p>
+      <div class="modal-actions">
+        <button id="move-cancel" class="btn" type="button">Cancel</button>
+        <button id="move-ok" class="btn primary" type="button">Move here</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="note-modal" hidden>
     <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="note-title">
       <h2 class="modal-title" id="note-title">Note</h2>

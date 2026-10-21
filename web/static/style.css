@@ -1026,6 +1026,102 @@ body[data-view="list"] .size-toggle {
   outline-offset: 1px;
 }
 
+/* --- move dialog --- */
+.move-dest {
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+  margin: 0 0 0.55rem;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.82rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+
+.move-dest-label {
+  flex: none;
+  font-size: 0.68rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.move-path {
+  min-width: 0;
+  overflow: hidden;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.move-list {
+  max-height: 15rem;
+  margin: 0 0 0.5rem;
+  padding: 0.25rem;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.move-row {
+  display: flex;
+  gap: 0.55rem;
+  align-items: center;
+  width: 100%;
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.move-row:hover,
+.move-row:focus-visible {
+  background: var(--hover);
+}
+
+.move-row .folder-icon {
+  flex: none;
+  font-size: 1rem;
+}
+
+.move-row .move-up-icon {
+  display: inline-flex;
+  flex: none;
+  width: 0.9rem;
+  height: 0.9rem;
+  color: var(--muted);
+}
+
+.move-row .move-up-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.move-empty {
+  padding: 0.5rem;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.move-hint {
+  min-height: 1.1rem;
+  margin: 0 0 0.75rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 /* Remove sits on the left of the note dialog's actions. */
 #note-remove {
   margin-right: auto;

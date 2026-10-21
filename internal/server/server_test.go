@@ -283,3 +283,61 @@ func TestInfoReportsVersionAndRoot(t *testing.T) {
 		t.Fatalf("disk/host missing: %+v", info)
 	}
 }
+
+func TestMoveEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dest", "taken.txt"), []byte("t"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	move := func(from, to string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(
+			"POST",
+			"/api/move?from="+url.QueryEscape(from)+"&to="+url.QueryEscape(to),
+			nil,
+		)
+		req.SetBasicAuth("admin", "secret")
+		return s.do(t, req)
+	}
+
+	rec := move("/a.txt", "/dest/a.txt")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("move status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode move response: %v", err)
+	}
+	if body.Path != "/dest/a.txt" {
+		t.Fatalf("returned path = %q, want /dest/a.txt", body.Path)
+	}
+	if _, err := os.Stat(filepath.Join(root, "dest", "a.txt")); err != nil {
+		t.Fatalf("moved file missing: %v", err)
+	}
+
+	if rec := move("/dest", "/dest/a.txt"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("move into itself status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if rec := move("/dest/a.txt", "/dest/taken.txt"); rec.Code != http.StatusConflict {
+		t.Fatalf("move onto existing status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	if rec := move("/missing.txt", "/dest/missing.txt"); rec.Code != http.StatusNotFound {
+		t.Fatalf("move missing status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if rec := move("/dest/a.txt", "/nope/a.txt"); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing destination status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if rec := move("/", "/dest"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("move root status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}

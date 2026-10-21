@@ -23,6 +23,8 @@ var (
 	ErrDirNotEmpty = errors.New("directory is not empty")
 	// ErrInvalidName is returned when a new name is empty or contains path separators.
 	ErrInvalidName = errors.New("invalid name")
+	// ErrMoveIntoSelf is returned when a folder is moved into its own subtree.
+	ErrMoveIntoSelf = errors.New("cannot move a folder into itself")
 )
 
 // MaxReadSize is the largest file the API will return as a text preview.
@@ -245,6 +247,50 @@ func (f *FS) Rename(rel, newName string) error {
 		return os.ErrExist
 	}
 	return os.Rename(oldFull, newFull)
+}
+
+// Move moves the entry at from to the full path to, which may be in another
+// directory. Both paths go through resolveTarget, so a symlink is moved as a
+// link and never resolves its target. The root cannot be moved, a folder cannot
+// be moved into itself or its own subtree, and an existing destination is
+// refused rather than overwritten.
+func (f *FS) Move(from, to string) error {
+	fromFull, err := f.resolveTarget(from)
+	if err != nil {
+		return err
+	}
+	toFull, err := f.resolveTarget(to)
+	if err != nil {
+		return err
+	}
+	if fromFull == toFull {
+		return nil // nothing to do
+	}
+	if !validName(filepath.Base(toFull)) {
+		return ErrInvalidName
+	}
+	info, err := os.Lstat(fromFull)
+	if err != nil {
+		return err
+	}
+	// Compare cleaned relative paths so "docs/../docs/sub" cannot dodge the
+	// check. The trailing separator keeps "/docs2" from matching "/docs".
+	fromRel := path.Clean("/" + strings.TrimSpace(from))
+	toRel := path.Clean("/" + strings.TrimSpace(to))
+	if info.IsDir() && strings.HasPrefix(toRel+"/", fromRel+"/") {
+		return ErrMoveIntoSelf
+	}
+	parent, err := os.Stat(filepath.Dir(toFull))
+	if err != nil {
+		return err
+	}
+	if !parent.IsDir() {
+		return os.ErrNotExist
+	}
+	if _, err := os.Lstat(toFull); err == nil {
+		return os.ErrExist
+	}
+	return os.Rename(fromFull, toFull)
 }
 
 // validName reports whether name is usable as a single file/folder name.

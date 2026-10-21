@@ -33,6 +33,9 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Settings: the ⚙ button in the header toggles hidden (dot) folders and files, switches
   between list and grid view, opens Server info, and clears tags, favorites, recent items,
   hidden marks or notes in one confirmed step
+- Move: any file or folder can be moved to another folder from its context menu; a folder
+  picker starts in the current folder, files are never offered as destinations, and
+  shortcuts, tags, notes and hidden marks follow the moved subtree
 - Hide entries: any file or folder can be hidden from its context menu (Hide / Unhide);
   hidden rows disappear from listings and shortcuts, and "Show hidden files" reveals them
   dimmed with a badge so they can be unhidden
@@ -253,6 +256,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | DELETE | `/api/delete`   | Delete a file or folder              |
 | POST   | `/api/mkdir`    | Create a folder                      |
 | POST   | `/api/rename`   | Rename a file or folder in place     |
+| POST   | `/api/move`     | Move a file or folder to another path|
 | POST   | `/api/create`   | Create an empty file                 |
 | PUT    | `/api/write`    | Overwrite a file (body is new content)|
 | POST   | `/api/upload`   | Upload one or more files (multipart) |
@@ -268,6 +272,11 @@ cannot be created.
 `POST /api/rename?path=/sub/old.txt&name=new.txt` renames in place (same folder).
 `name` must be a plain name with no `/`. Renaming onto an existing path returns
 `409` rather than overwriting; a missing source returns `404`.
+
+`POST /api/move?from=/sub/old.txt&to=/other/old.txt` moves an entry, keeping or
+changing its name. Both paths are root-relative; the destination folder must
+exist (`404` otherwise), an existing destination returns `409`, and moving a
+folder into itself or its own subtree returns `400`.
 
 `POST /api/create?path=/sub/note.txt` creates an empty file (`409` if it exists).
 `PUT /api/write?path=/sub/note.txt` replaces a file's contents with the raw

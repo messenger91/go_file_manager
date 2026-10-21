@@ -66,6 +66,14 @@
     tagsToggle: document.getElementById("tags-toggle"),
     settingsToggle: document.getElementById("settings-toggle"),
     notesToggle: document.getElementById("notes-toggle"),
+    moveModal: document.getElementById("move-modal"),
+    moveTitle: document.getElementById("move-title"),
+    moveName: document.getElementById("move-name"),
+    movePath: document.getElementById("move-path"),
+    moveList: document.getElementById("move-list"),
+    moveHint: document.getElementById("move-hint"),
+    moveOk: document.getElementById("move-ok"),
+    moveCancel: document.getElementById("move-cancel"),
     noteModal: document.getElementById("note-modal"),
     noteName: document.getElementById("note-name"),
     noteText: document.getElementById("note-text"),
@@ -1050,6 +1058,13 @@
     return sendJSON(
       "POST",
       "/api/rename?path=" + encodeURIComponent(path) + "&name=" + encodeURIComponent(name)
+    );
+  }
+
+  function apiMove(from, to) {
+    return sendJSON(
+      "POST",
+      "/api/move?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)
     );
   }
 
@@ -2143,6 +2158,136 @@
     }
   }
 
+  // --- move: pick a destination folder, then rename across folders ---
+  let moveEntry = null;
+  let movePath = "/";
+  let moveSeq = 0;
+
+  function parentOf(path) {
+    const index = path.lastIndexOf("/");
+    return index <= 0 ? "/" : path.slice(0, index);
+  }
+
+  function openMove(entry) {
+    moveEntry = { name: entry.name, path: entry.path, isDir: !!entry.isDir };
+    movePath = parentOf(entry.path);
+    els.moveTitle.textContent = entry.isDir ? "Move folder" : "Move file";
+    els.moveName.textContent = entry.path;
+    els.moveModal.hidden = false;
+    loadMoveFolders();
+  }
+
+  function closeMove() {
+    moveSeq++;
+    els.moveModal.hidden = true;
+    moveEntry = null;
+  }
+
+  function moveRow(kind, label, path) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "move-row" + (kind === "up" ? " move-up" : "");
+    button.dataset.path = path;
+
+    if (kind === "up") {
+      button.appendChild(menuIcon("up", "move-up-icon"));
+    } else {
+      const icon = document.createElement("span");
+      icon.className = "folder-icon";
+      renderEntryIcon(icon, { isDir: true, path: path });
+      button.appendChild(icon);
+    }
+
+    const text = document.createElement("span");
+    text.className = "move-name";
+    text.textContent = label;
+    text.title = path;
+    button.appendChild(text);
+
+    button.addEventListener("click", function () {
+      movePath = path;
+      loadMoveFolders();
+    });
+    return button;
+  }
+
+  async function loadMoveFolders() {
+    const seq = ++moveSeq;
+    els.movePath.textContent = movePath;
+    els.movePath.title = movePath;
+    els.moveList.textContent = "";
+    els.moveHint.textContent = "Loading…";
+    els.moveOk.disabled = true;
+    try {
+      const data = await api("/api/list", movePath, showHidden ? "&hidden=1" : "");
+      if (seq !== moveSeq) return;
+      renderMoveList(data.path, data.entries);
+    } catch (err) {
+      if (seq !== moveSeq) return;
+      els.moveHint.textContent = "Cannot open this folder: " + err.message;
+    }
+  }
+
+  function renderMoveList(path, entries) {
+    movePath = path;
+    els.movePath.textContent = path;
+    els.movePath.title = path;
+    els.moveList.textContent = "";
+
+    if (path !== "/") {
+      els.moveList.appendChild(moveRow("up", "Up", parentOf(path)));
+    }
+    const folders = entries.filter(function (entry) {
+      // Never offer the entry being moved as its own destination (or a way in).
+      return entry.isDir && (!moveEntry || entry.path !== moveEntry.path);
+    });
+    folders.forEach(function (folder) {
+      els.moveList.appendChild(moveRow("folder", folder.name, folder.path));
+    });
+    if (folders.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "move-empty";
+      empty.textContent = "No folders here.";
+      els.moveList.appendChild(empty);
+    }
+
+    updateMoveState();
+
+    const first = els.moveList.querySelector("button.move-row");
+    if (first) first.focus({ preventScroll: true });
+  }
+
+  function updateMoveState() {
+    if (!moveEntry) return;
+    const same = parentOf(moveEntry.path) === movePath;
+    els.moveOk.disabled = same;
+    if (same) {
+      els.moveHint.textContent = "Already in this folder — open another one below.";
+      return;
+    }
+    const label = movePath === "/" ? "Home" : pathName(movePath);
+    els.moveHint.textContent =
+      'Open a folder to go deeper, or move into "' + label + '".';
+  }
+
+  async function confirmMove() {
+    if (!moveEntry || els.moveOk.disabled) return;
+    const entry = moveEntry;
+    const destinationDir = movePath;
+    const destination =
+      destinationDir === "/" ? "/" + entry.name : destinationDir + "/" + entry.name;
+    try {
+      await apiMove(entry.path, destination);
+      closeMove();
+      rekeyFolderPaths(entry.path, destination);
+      closeViewer();
+      await navigate(currentPath);
+      setStatus('Moved "' + entry.name + '" to ' + destinationDir + ".", false);
+    } catch (err) {
+      setStatus("Failed to move: " + err.message, true);
+    }
+  }
+
   async function createFile() {
     const name = await promptDialog({ title: "New file", value: "", confirmLabel: "Create" });
     if (name === null) return; // cancelled
@@ -2368,6 +2513,8 @@
     open: '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
     preview: '<path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="3"/>',
     rename: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+    move: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h6A1.5 1.5 0 0 1 18 10v8.5A1.5 1.5 0 0 1 16.5 20h-12A1.5 1.5 0 0 1 3 18.5z"/><path d="M11 13.5h6.5M14.5 10.5l3 3-3 3"/>',
+    up: '<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>',
     download: '<path d="M12 4v11"/><path d="M7 10.5l5 5 5-5"/><path d="M5 20h14"/>',
     delete: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/>',
     newFolder: '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>',
@@ -2662,6 +2809,11 @@
       icon: hidden ? "eye" : "eyeOff",
       action: function () { toggleHiddenEntry(entry); },
     };
+    const moveItem = {
+      label: "Move to…",
+      icon: "move",
+      action: function () { openMove(entry); },
+    };
     const noteItem = {
       label: noteFor(entry.path) ? "Edit note" : "Add note",
       icon: "note",
@@ -2676,6 +2828,7 @@
       ? [
           { label: "Open", icon: "open", action: function () { navigate(entry.path); } },
           { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
+          moveItem,
           favoriteItem,
           { separator: true },
           {
@@ -2697,6 +2850,7 @@
       : [
           { label: "Preview", icon: "preview", action: function () { openFile(entry); } },
           { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
+          moveItem,
           favoriteItem,
           { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
           { separator: true },
@@ -2918,6 +3072,12 @@
     if (e.target === els.uploadModal && !uploadRequest) closeUploadModal();
   });
 
+  els.moveOk.addEventListener("click", confirmMove);
+  els.moveCancel.addEventListener("click", closeMove);
+  els.moveModal.addEventListener("click", function (e) {
+    if (e.target === els.moveModal) closeMove();
+  });
+
   els.noteSave.addEventListener("click", saveNote);
   els.noteCancel.addEventListener("click", closeNote);
   els.noteRemove.addEventListener("click", function () {
@@ -2949,6 +3109,8 @@
       closeProperties();
     } else if (e.key === "Escape" && !els.noteModal.hidden) {
       closeNote();
+    } else if (e.key === "Escape" && !els.moveModal.hidden) {
+      closeMove();
     } else if (e.key === "Escape" && !els.viewer.hidden) {
       if (editing) cancelEdit();
       else closeViewer();

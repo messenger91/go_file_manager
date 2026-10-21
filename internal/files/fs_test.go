@@ -477,3 +477,161 @@ func TestDisk(t *testing.T) {
 		t.Fatalf("used (%d) > total (%d)", info.UsedBytes, info.TotalBytes)
 	}
 }
+
+func TestMoveFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Move("/a.txt", "/dest/a.txt"); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a.txt")); !os.IsNotExist(err) {
+		t.Fatalf("source still exists: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dest", "a.txt"))
+	if err != nil || string(data) != "payload" {
+		t.Fatalf("moved file = %q, %v; want payload", data, err)
+	}
+}
+
+func TestMoveDirectoryKeepsContents(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "nested", "note.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Move("/docs", "/dest/docs"); err != nil {
+		t.Fatalf("move dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "docs")); !os.IsNotExist(err) {
+		t.Fatalf("source dir still exists: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dest", "docs", "nested", "note.txt"))
+	if err != nil || string(data) != "hi" {
+		t.Fatalf("nested file = %q, %v; want hi", data, err)
+	}
+}
+
+func TestMoveFolderIntoItselfFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "docs2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	for _, to := range []string{"/docs/sub/docs", "/docs/./sub/docs", "/docs/../docs/sub/docs"} {
+		if err := f.Move("/docs", to); !errors.Is(err, ErrMoveIntoSelf) {
+			t.Fatalf("move into itself (%s) error = %v, want ErrMoveIntoSelf", to, err)
+		}
+	}
+	// A sibling whose name merely starts with the source name is fine.
+	if err := f.Move("/docs", "/docs2/docs"); err != nil {
+		t.Fatalf("move to sibling prefix: %v", err)
+	}
+}
+
+func TestMoveOntoExistingFails(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "dest/a.txt"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := New(root)
+
+	if err := f.Move("/a.txt", "/dest/a.txt"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("move onto existing error = %v, want os.ErrExist", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "a.txt")); string(data) != "a.txt" {
+		t.Fatalf("source changed despite failed move")
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "dest", "a.txt")); string(data) != "dest/a.txt" {
+		t.Fatalf("destination changed despite failed move")
+	}
+}
+
+func TestMoveMissingPathsFail(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Move("/missing.txt", "/a.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing source error = %v, want os.ErrNotExist", err)
+	}
+	if err := f.Move("/a.txt", "/nope/a.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing destination error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestMoveRootRejected(t *testing.T) {
+	f := New(t.TempDir())
+	if err := f.Move("/", "/dest"); !errors.Is(err, ErrRootOperation) {
+		t.Fatalf("move root error = %v, want ErrRootOperation", err)
+	}
+	if err := f.Move("/a.txt", "/"); !errors.Is(err, ErrRootOperation) {
+		t.Fatalf("move onto root error = %v, want ErrRootOperation", err)
+	}
+}
+
+func TestMoveSamePathNoop(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Move("/a.txt", "/a.txt"); err != nil {
+		t.Fatalf("move onto itself: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a.txt")); err != nil {
+		t.Fatalf("file disappeared: %v", err)
+	}
+}
+
+func TestMoveSymlinkMovesLinkOnly(t *testing.T) {
+	outside := t.TempDir()
+	target := filepath.Join(outside, "target.txt")
+	if err := os.WriteFile(target, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Move("/link", "/dest/link"); err != nil {
+		t.Fatalf("move symlink: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(root, "dest", "link"))
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("destination is not a symlink: %v, %v", info, err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "outside" {
+		t.Fatalf("link target changed: %q, %v", data, err)
+	}
+}

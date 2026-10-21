@@ -43,7 +43,7 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - `internal/config` — env/`.env` loading. Precedence: **process env > `.env` > defaults**.
   `.env` is read from the current working directory.
 - `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`,
-  `Delete`, `Mkdir`, `Rename`, `Create`, `Write`, `Upload`, `Disk`). This is the security
+  `Delete`, `Mkdir`, `Rename`, `Move`, `Create`, `Write`, `Upload`, `Disk`). This is the security
   boundary; test changes here.
 - `internal/server` — HTTP routes, authentication (login form + sessions), JSON/error
   handling.
@@ -89,7 +89,17 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   upload over the limit is rejected by `MaxBytesReader` and mapped to `413` with a
   "larger than the 50 MB limit" message (the limit is on the **whole multipart body**, so
   it includes MIME framing overhead).
-- No move endpoint yet (rename is same-folder only). Add it only against confirmed scope.
+- Move is a cross-folder rename: `POST /api/move?from=/a&to=/b/a` calls `files.Move`,
+  which resolves both ends with `resolveTarget` (so a symlink moves as a link), refuses
+  the root, requires the destination folder to exist (404), refuses an existing
+  destination (409) and refuses moving a folder into itself or its subtree (`ErrMoveIntoSelf`,
+  400, compared on cleaned relative paths with a trailing slash so `/docs2` is not treated
+  as `/docs`). In `app.js` the context menu's "Move to…" opens `#move-modal`: a small folder
+  picker that starts at the entry's parent, lists only folders from `/api/list` (excluding
+  the entry itself, so its subtree can never be entered), focuses the first row, and keeps
+  "Move here" disabled while the shown folder is the entry's current parent. Confirming
+  calls `rekeyFolderPaths()` so pins, favorites, tags, notes, hidden marks and recents
+  follow the move, then refreshes the listing.
 - Navigation is in-page only: `navigate()` never calls `history.pushState`, so the browser
   Back button leaves the app. The in-app `#nav-back` arrow uses its own `navHistory` stack
   (capped at 50): it returns to the previous folder, falls back to the parent when the
