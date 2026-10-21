@@ -97,6 +97,7 @@ body {
 
 /* Header tag, star, clock and gear: stroke icons that inherit the button colour. */
 .tags-toggle svg,
+.notes-toggle svg,
 .favorites-toggle svg,
 .recent-toggle svg,
 .settings-toggle svg {
@@ -112,6 +113,10 @@ body {
 
 .favorites-toggle.has-items {
   color: var(--star);
+}
+
+.notes-toggle.has-items {
+  color: var(--accent);
 }
 
 .favorites-toggle.has-items svg {
@@ -489,6 +494,28 @@ body[data-view="list"] .size-toggle {
   width: 0.8rem;
   height: 0.8rem;
   color: var(--muted);
+}
+
+.menu-icon.note-badge {
+  width: 0.8rem;
+  height: 0.8rem;
+  color: var(--accent);
+}
+
+/* Second line in a menu row, e.g. the note preview. */
+.menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.menu-detail {
+  overflow: hidden;
+  font-size: 0.74rem;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Entries revealed by "Show hidden files" are dimmed so they read as hidden. */
@@ -967,6 +994,43 @@ body[data-view="list"] .size-toggle {
   gap: 0.5rem;
 }
 
+.btn.primary {
+  color: var(--accent-contrast);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.btn.primary:hover {
+  background: var(--accent);
+  border-color: var(--accent);
+  filter: brightness(1.08);
+}
+
+.note-text {
+  width: 100%;
+  min-height: 8rem;
+  margin: 0 0 1rem;
+  padding: 0.55rem 0.65rem;
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  resize: vertical;
+}
+
+.note-text:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Remove sits on the left of the note dialog's actions. */
+#note-remove {
+  margin-right: auto;
+}
+
 .prompt-input {
   width: 100%;
   font: inherit;
@@ -1432,9 +1496,9 @@ body[data-view="grid"] #columns-toggle {
   }
 }
 
-/* Narrow phones: nine icon controls leave too little room for the path, so
-   the controls take one row and the breadcrumbs the next. */
-@media (max-width: 520px) {
+/* Narrow phones: the ten icon controls leave too little room for the path,
+   so the controls take one row and the breadcrumbs the next. */
+@media (max-width: 560px) {
   .topbar {
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -1446,8 +1510,16 @@ body[data-view="grid"] #columns-toggle {
   }
 }
 
+/* Without the ▦ button the nine remaining controls fit 401px; view switching
+   stays available in the settings menu. */
+@media (max-width: 520px) {
+  #view-toggle {
+    display: none;
+  }
+}
+
 /* The smallest phones: Server info moves into the settings menu (it is always
-   there), and the remaining controls shave a little so all eight still fit
+   there), and the remaining eight controls shave a little so they still fit
    across 320px without overflowing. */
 @media (max-width: 400px) {
   .topbar {

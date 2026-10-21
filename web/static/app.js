@@ -65,6 +65,13 @@
     recentToggle: document.getElementById("recent-toggle"),
     tagsToggle: document.getElementById("tags-toggle"),
     settingsToggle: document.getElementById("settings-toggle"),
+    notesToggle: document.getElementById("notes-toggle"),
+    noteModal: document.getElementById("note-modal"),
+    noteName: document.getElementById("note-name"),
+    noteText: document.getElementById("note-text"),
+    noteSave: document.getElementById("note-save"),
+    noteCancel: document.getElementById("note-cancel"),
+    noteRemove: document.getElementById("note-remove"),
     sizeToggle: document.getElementById("size-toggle"),
     grid: document.getElementById("grid"),
   };
@@ -273,6 +280,24 @@
     return typeof path === "string" && path.indexOf("/") === 0 && path !== "/";
   });
 
+  // One personal note per entry, stored per browser and shown in the header.
+  let notes = loadStored("notes", []);
+  if (!Array.isArray(notes)) notes = [];
+  notes = notes
+    .filter(function (item) {
+      return item && typeof item.path === "string" && item.path !== "" && item.path !== "/" &&
+        typeof item.text === "string" && item.text.trim() !== "";
+    })
+    .map(function (item) {
+      return {
+        path: item.path,
+        name: typeof item.name === "string" && item.name ? item.name : pathName(item.path),
+        isDir: !!item.isDir,
+        text: item.text,
+        updated: typeof item.updated === "number" ? item.updated : 0,
+      };
+    });
+
   // Favorites (folders and files) are listed in the header for quick access.
   let favorites = loadStored("favorites", []);
   if (!Array.isArray(favorites)) favorites = [];
@@ -453,6 +478,20 @@
     setStatus("Cleared " + count + " folder " + (count === 1 ? "tag." : "tags."), false);
   }
 
+  function noteFor(path) {
+    return notes.find(function (item) {
+      return item.path === path;
+    });
+  }
+
+  function updateNotesButton() {
+    const count = notes.length;
+    els.notesToggle.classList.toggle("has-items", count > 0);
+    const label = count ? "Notes (" + count + ")" : "Notes (empty)";
+    els.notesToggle.setAttribute("aria-label", label);
+    els.notesToggle.title = label;
+  }
+
   function isHidden(path) {
     return hiddenPaths.indexOf(path) !== -1;
   }
@@ -591,7 +630,7 @@
     function clearLabel(name, count) {
       return count ? name + " (" + count + ")" : name;
     }
-    return [
+    const items = [
       {
         label: "Show hidden files",
         title: "Dot entries and entries you hid from the context menu",
@@ -600,8 +639,14 @@
         action: toggleHidden,
       },
       { separator: true },
-      { label: "Server info", icon: "info", action: function () { openInfo(); } },
-      { separator: true },
+    ];
+    // The ▦ header button is hidden on narrow screens, so view switching
+    // lives here too.
+    items.push.apply(items, viewMenuItems());
+    items.push({ separator: true });
+    items.push({ label: "Server info", icon: "info", action: function () { openInfo(); } });
+    items.push({ separator: true });
+    items.push(
       {
         label: clearLabel("Clear tags", tags),
         icon: "tag",
@@ -630,7 +675,15 @@
         disabled: hiddenPaths.length === 0,
         action: clearHidden,
       },
-    ];
+      {
+        label: clearLabel("Clear notes", notes.length),
+        icon: "note",
+        danger: true,
+        disabled: notes.length === 0,
+        action: clearNotes,
+      }
+    );
+    return items;
   }
 
   function showSettingsMenu() {
@@ -638,6 +691,119 @@
     buildMenu(rect.right, rect.bottom + 6, settingsMenuItems(), "Settings");
     els.contextMenu.dataset.source = "settings";
     els.settingsToggle.setAttribute("aria-expanded", "true");
+  }
+
+  // --- personal notes (one per entry) ---
+  let noteEntry = null;
+
+  function openNote(entry) {
+    const existing = noteFor(entry.path);
+    noteEntry = { name: entry.name, path: entry.path, isDir: !!entry.isDir };
+    els.noteName.textContent = entry.path;
+    els.noteText.value = existing ? existing.text : "";
+    els.noteRemove.hidden = !existing;
+    els.noteModal.hidden = false;
+    els.noteText.focus();
+    els.noteText.setSelectionRange(els.noteText.value.length, els.noteText.value.length);
+  }
+
+  function closeNote() {
+    els.noteModal.hidden = true;
+    noteEntry = null;
+  }
+
+  function saveNote() {
+    if (!noteEntry) return;
+    const text = els.noteText.value.trim();
+    const existing = noteFor(noteEntry.path);
+    if (!text) {
+      closeNote();
+      if (existing) removeNote(existing.path);
+      return;
+    }
+    notes = notes.filter(function (item) {
+      return item.path !== noteEntry.path;
+    });
+    notes.unshift({
+      path: noteEntry.path,
+      name: noteEntry.name,
+      isDir: noteEntry.isDir,
+      text: text,
+      updated: Date.now(),
+    });
+    saveStored("notes", notes);
+    updateNotesButton();
+    renderList();
+    setStatus('Saved note for "' + noteEntry.name + '".', false);
+    closeNote();
+  }
+
+  function removeNote(path) {
+    const item = noteFor(path);
+    if (!item) return;
+    notes = notes.filter(function (note) {
+      return note.path !== path;
+    });
+    saveStored("notes", notes);
+    updateNotesButton();
+    renderList();
+    setStatus('Removed the note for "' + item.name + '".', false);
+  }
+
+  async function clearNotes() {
+    const count = notes.length;
+    if (count === 0) return;
+    const ok = await confirmDialog({
+      title: "Clear notes",
+      message:
+        "Delete all " + count + " " + (count === 1 ? "note" : "notes") +
+        "? This cannot be undone.",
+      confirmLabel: "Clear notes",
+    });
+    if (!ok) return;
+    notes = [];
+    saveStored("notes", notes);
+    updateNotesButton();
+    renderList();
+    setStatus("Cleared " + count + " " + (count === 1 ? "note." : "notes."), false);
+  }
+
+  function notesMenuItems() {
+    if (notes.length === 0) {
+      return [
+        { label: "No notes yet", icon: "note", disabled: true },
+        { separator: true },
+        { label: "Right-click a folder or file and choose Add note", icon: "info", disabled: true },
+      ];
+    }
+    return notes
+      .slice()
+      .sort(function (a, b) {
+        return b.updated - a.updated;
+      })
+      .map(function (item) {
+        const firstLine = item.text.split("\n")[0];
+        return {
+          label: item.name,
+          detail: firstLine,
+          title: item.text,
+          icon: "note",
+          action: function () {
+            openNote({ name: item.name, path: item.path, isDir: item.isDir });
+          },
+          remove: function () {
+            removeNote(item.path);
+          },
+        };
+      });
+  }
+
+  function showNotesMenu() {
+    const rect = els.notesToggle.getBoundingClientRect();
+    const title = notes.length ? "Notes (" + notes.length + ")" : "Notes";
+    buildMenu(rect.right, rect.bottom + 6, notesMenuItems(), title);
+    els.contextMenu.dataset.source = "notes";
+    els.notesToggle.setAttribute("aria-expanded", "true");
   }
 
   function removeFavorite(path) {
@@ -691,6 +857,24 @@
       return mapped;
     });
     if (hiddenChanged) saveStored("hiddenPaths", hiddenPaths);
+
+    let notesChanged = false;
+    notes = notes.map(function (item) {
+      const mapped = remapPath(item.path, oldPath, newPath);
+      if (mapped === item.path) return item;
+      notesChanged = true;
+      return {
+        path: mapped,
+        name: mapped.split("/").pop(),
+        isDir: item.isDir,
+        text: item.text,
+        updated: item.updated,
+      };
+    });
+    if (notesChanged) {
+      saveStored("notes", notes);
+      updateNotesButton();
+    }
 
     let recentChanged = false;
     recent = recent.map(function (item) {
@@ -765,6 +949,15 @@
       return keep(candidate);
     });
     if (hiddenPaths.length !== hiddenBefore) saveStored("hiddenPaths", hiddenPaths);
+
+    const notesBefore = notes.length;
+    notes = notes.filter(function (item) {
+      return keep(item.path);
+    });
+    if (notes.length !== notesBefore) {
+      saveStored("notes", notes);
+      updateNotesButton();
+    }
   }
 
   // --- helpers ---
@@ -1395,6 +1588,7 @@
   function appendEntryBadges(wrap, entry, pinned) {
     if (pinned) wrap.appendChild(menuIcon("pin", "pin-badge"));
     if (isFavorite(entry.path)) wrap.appendChild(menuIcon("star", "favorite-badge"));
+    if (noteFor(entry.path)) wrap.appendChild(menuIcon("note", "note-badge"));
     if (isHidden(entry.path)) wrap.appendChild(menuIcon("eyeOff", "hidden-badge"));
   }
 
@@ -1640,6 +1834,7 @@
     badges.className = "card-badges";
     if (pinned) badges.appendChild(menuIcon("pin", "pin-badge"));
     if (isFavorite(entry.path)) badges.appendChild(menuIcon("star", "favorite-badge"));
+    if (noteFor(entry.path)) badges.appendChild(menuIcon("note", "note-badge"));
     if (isHidden(entry.path)) badges.appendChild(menuIcon("eyeOff", "hidden-badge"));
 
     const actions = document.createElement("div");
@@ -2184,6 +2379,7 @@
     properties: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
     tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
     eye: '<path d="M2.5 12s3.6-6.5 9.5-6.5S21.5 12 21.5 12s-3.6 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>',
+    note: '<path d="M20 4.5A1.5 1.5 0 0 0 18.5 3h-13A1.5 1.5 0 0 0 4 4.5v9A1.5 1.5 0 0 0 5.5 15H9l3.5 4.5V15h6A1.5 1.5 0 0 0 20 13.5z"/><path d="M8 8h8M8 11h5"/>',
     eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 6.1A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.8 3.7"/><path d="M6.4 6.9C3.9 8.7 2.5 12 2.5 12s3.5 6.5 9.5 6.5c1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     pin: '<path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76z"/>',
@@ -2394,7 +2590,19 @@
       const label = document.createElement("span");
       label.className = "menu-label";
       label.textContent = item.label;
-      button.appendChild(label);
+      if (item.detail) {
+        // A second line, used by the notes menu to preview the note.
+        const text = document.createElement("span");
+        text.className = "menu-text";
+        text.appendChild(label);
+        const detail = document.createElement("span");
+        detail.className = "menu-detail";
+        detail.textContent = item.detail;
+        text.appendChild(detail);
+        button.appendChild(text);
+      } else {
+        button.appendChild(label);
+      }
 
       if (item.checked) button.appendChild(menuIcon("check", "menu-check"));
 
@@ -2421,8 +2629,8 @@
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "context-remove";
-      remove.title = "Remove from favorites";
-      remove.setAttribute("aria-label", "Remove " + item.label + " from favorites");
+      remove.title = item.removeLabel || "Remove from favorites";
+      remove.setAttribute("aria-label", item.removeLabel || "Remove " + item.label + " from favorites");
       remove.appendChild(menuIcon("close"));
       remove.addEventListener("click", function () {
         hideContextMenu();
@@ -2454,6 +2662,11 @@
       icon: hidden ? "eye" : "eyeOff",
       action: function () { toggleHiddenEntry(entry); },
     };
+    const noteItem = {
+      label: noteFor(entry.path) ? "Edit note" : "Add note",
+      icon: "note",
+      action: function () { openNote(entry); },
+    };
     const favoriteItem = {
       label: isFavorite(entry.path) ? "Remove from favorites" : "Add to favorites",
       icon: "star",
@@ -2477,6 +2690,7 @@
           },
           { separator: true },
           hideItem,
+          noteItem,
           { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ]
@@ -2487,6 +2701,7 @@
           { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
           { separator: true },
           hideItem,
+          noteItem,
           { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ];
@@ -2543,6 +2758,15 @@
       return;
     }
     showRecentMenu();
+  });
+
+  els.notesToggle.addEventListener("click", function (e) {
+    e.stopPropagation();
+    if (!els.contextMenu.hidden && els.contextMenu.dataset.source === "notes") {
+      hideContextMenu();
+      return;
+    }
+    showNotesMenu();
   });
 
   els.favoritesToggle.addEventListener("click", function (e) {
@@ -2694,6 +2918,19 @@
     if (e.target === els.uploadModal && !uploadRequest) closeUploadModal();
   });
 
+  els.noteSave.addEventListener("click", saveNote);
+  els.noteCancel.addEventListener("click", closeNote);
+  els.noteRemove.addEventListener("click", function () {
+    if (noteEntry) {
+      const path = noteEntry.path;
+      closeNote();
+      removeNote(path);
+    }
+  });
+  els.noteModal.addEventListener("click", function (e) {
+    if (e.target === els.noteModal) closeNote();
+  });
+
   els.viewerClose.addEventListener("click", closeViewer);
   els.viewer.addEventListener("click", function (e) {
     if (e.target === els.viewer && !editing) closeViewer();
@@ -2710,6 +2947,8 @@
       closeInfo();
     } else if (e.key === "Escape" && !els.propertiesModal.hidden) {
       closeProperties();
+    } else if (e.key === "Escape" && !els.noteModal.hidden) {
+      closeNote();
     } else if (e.key === "Escape" && !els.viewer.hidden) {
       if (editing) cancelEdit();
       else closeViewer();
@@ -2752,6 +2991,7 @@
   renderTableHead();
   applyGridSize(gridSize);
   updateFavoritesButton();
+  updateNotesButton();
   updateRecentButton();
   updateTagsButton();
   applyView(viewMode);

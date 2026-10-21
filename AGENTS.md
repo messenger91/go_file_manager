@@ -143,7 +143,9 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - Settings: the ⚙ header button (`#settings-toggle`, `showSettingsMenu()`) opens
   `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, a
   "Server info" entry (so ℹ️ can be hidden on tiny screens), then Clear tags / Clear
-  favorites / Clear recent / Clear hidden with counts (disabled at 0). Dot entries are hidden by default:
+  favorites / Clear recent / Clear hidden / Clear notes with counts (disabled at 0). The
+  settings menu also carries `viewMenuItems()` (List/Grid) because the ▦ header button is
+  hidden below 520px. Dot entries are hidden by default:
   `showHidden` lives in localStorage, `navigate()` adds `&hidden=1` to `/api/list` when it
   is on, and `files.List(rel, showHidden)` skips dot names server-side (so scripts see the
   same default). Toggling re-fetches the current folder with
@@ -162,6 +164,19 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   above — the one settings toggle reveals both. `rekeyFolderPaths()` rekeys hidden paths
   and `forgetFolderPaths()` prunes them; `clearHidden()` (Settings) resets every mark after
   a confirmation. Hiding never touches favorites, tags or recents, which stay reachable.
+- Notes are the sixth browser-local key, `notes` (`[{path, name, isDir, text, updated}]`,
+  one per entry). The context menu's Add note / Edit note (files and folders, between Hide
+  and Properties) calls `openNote()`, which fills `#note-modal` (`#note-text` textarea,
+  `#note-remove` shown only for an existing note). Saving trims the text: empty removes the
+  note, otherwise it replaces the entry with a fresh `updated` (Date.now()). Header button
+  `#notes-toggle` (📝-style SVG, accent when non-empty) opens `notesMenuItems()` via
+  `showNotesMenu()`: newest first, each row is `{label, detail, title, remove}` where
+  `detail` is the note's first line (rendered by `buildMenu()` as `.menu-detail` inside
+  `.menu-text`) and `title` is the whole text; clicking opens the note, the trailing ✕
+  removes it. Noted entries get a `.note-badge` in list and grid. `rekeyFolderPaths()`
+  moves notes with renames, `forgetFolderPaths()` prunes them on delete, and
+  `clearNotes()` (Settings → Clear notes, confirmed) wipes all of them. The notes menu's
+  empty state is two disabled hints.
 - Properties: the context menu's "Properties" item (files and folders, right before
   Delete) calls `showProperties(entry)`. It opens `#properties-modal` immediately with the
   listing's data, then re-fetches `GET /api/metadata` to refresh it, so a folder listed

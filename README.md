@@ -27,8 +27,12 @@ previewing, editing, uploading, and deleting files under a single root folder.
   that list or from the entry's context menu (remembered per browser)
 - Recent: the 🕘 button in the header lists the last 20 folders you visited and files you
   opened, newest first (folders open, files preview); remove one entry or clear the list
-- Settings: the ⚙ button in the header toggles hidden (dot) folders and files, opens
-  Server info, and clears tags, favorites, recent items or hidden marks in one confirmed step
+- Notes: keep a personal text note on any file or folder from its context menu (Add note /
+  Edit note); noted entries carry a badge, and the 📝 header button lists every note with a
+  preview line, opening the full text when clicked
+- Settings: the ⚙ button in the header toggles hidden (dot) folders and files, switches
+  between list and grid view, opens Server info, and clears tags, favorites, recent items,
+  hidden marks or notes in one confirmed step
 - Hide entries: any file or folder can be hidden from its context menu (Hide / Unhide);
   hidden rows disappear from listings and shortcuts, and "Show hidden files" reveals them
   dimmed with a badge so they can be unhidden

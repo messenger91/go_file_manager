@@ -42,6 +42,15 @@
       title="Folder tags"
     ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L2 12V2h10l8.6 8.6a2 2 0 0 1 0 2.8z"/><path d="M7 7h.01"/></svg></button>
     <button
+      id="notes-toggle"
+      class="btn icon-btn notes-toggle"
+      type="button"
+      aria-haspopup="menu"
+      aria-expanded="false"
+      aria-label="Notes"
+      title="Notes"
+    ><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4.5A1.5 1.5 0 0 0 18.5 3h-13A1.5 1.5 0 0 0 4 4.5v9A1.5 1.5 0 0 0 5.5 15H9l3.5 4.5V15h6A1.5 1.5 0 0 0 20 13.5z"/><path d="M8 8h8M8 11h5"/></svg></button>
+    <button
       id="recent-toggle"
       class="btn icon-btn recent-toggle"
       type="button"
@@ -213,6 +222,25 @@
       <dl class="info-list" id="properties-list"></dl>
       <div class="modal-actions">
         <button id="properties-close" class="btn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal" id="note-modal" hidden>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="note-title">
+      <h2 class="modal-title" id="note-title">Note</h2>
+      <p class="modal-subtitle" id="note-name"></p>
+      <textarea
+        id="note-text"
+        class="note-text"
+        rows="6"
+        maxlength="4000"
+        placeholder="Write a note about this folder or file…"
+      ></textarea>
+      <div class="modal-actions">
+        <button id="note-remove" class="btn danger" type="button" hidden>Remove note</button>
+        <button id="note-cancel" class="btn" type="button">Cancel</button>
+        <button id="note-save" class="btn primary" type="button">Save</button>
       </div>
     </div>
   </div>
