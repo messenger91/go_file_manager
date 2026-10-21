@@ -143,7 +143,7 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - Settings: the ⚙ header button (`#settings-toggle`, `showSettingsMenu()`) opens
   `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, a
   "Server info" entry (so ℹ️ can be hidden on tiny screens), then Clear tags / Clear
-  favorites / Clear recent with counts (disabled at 0). Dot entries are hidden by default:
+  favorites / Clear recent / Clear hidden with counts (disabled at 0). Dot entries are hidden by default:
   `showHidden` lives in localStorage, `navigate()` adds `&hidden=1` to `/api/list` when it
   is on, and `files.List(rel, showHidden)` skips dot names server-side (so scripts see the
   same default). Toggling re-fetches the current folder with
@@ -152,6 +152,16 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   recent" included, via `clearRecentItems()`), then resets the array/object, saves it,
   updates the matching header button and re-renders the list where badges or colours
   changed. `clearLabels` show counts only when non-zero.
+- Hand-hidden entries are a fifth browser-local key, `hiddenPaths` (array of paths). The
+  context menu's Hide/Unhide item (files and folders, before Properties) calls
+  `toggleHiddenEntry()`; `shownEntries()` drops hidden paths unless `showHidden` is on, and
+  `renderList()` counts against that filtered total. `pinnedEntries()` applies the same
+  rule, so a hidden folder's pinned shortcut disappears too (the pin itself is kept). When
+  revealed, rows/cards get `.is-hidden` (dimmed) and a `.hidden-badge` (eye-off icon).
+  Hiding is client-side and per browser; dot entries are the server-side `hidden=1` filter
+  above — the one settings toggle reveals both. `rekeyFolderPaths()` rekeys hidden paths
+  and `forgetFolderPaths()` prunes them; `clearHidden()` (Settings) resets every mark after
+  a confirmation. Hiding never touches favorites, tags or recents, which stay reachable.
 - Properties: the context menu's "Properties" item (files and folders, right before
   Delete) calls `showProperties(entry)`. It opens `#properties-modal` immediately with the
   listing's data, then re-fetches `GET /api/metadata` to refresh it, so a folder listed

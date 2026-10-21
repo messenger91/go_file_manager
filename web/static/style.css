@@ -485,6 +485,18 @@ body[data-view="list"] .size-toggle {
   color: var(--star);
 }
 
+.menu-icon.hidden-badge {
+  width: 0.8rem;
+  height: 0.8rem;
+  color: var(--muted);
+}
+
+/* Entries revealed by "Show hidden files" are dimmed so they read as hidden. */
+.listing tr.is-hidden,
+.card.is-hidden {
+  opacity: 0.55;
+}
+
 /* Grid card badges sit in the top-left corner, mirroring the actions. */
 .card-badges {
   position: absolute;

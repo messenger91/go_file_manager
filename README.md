@@ -28,7 +28,10 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Recent: the 🕘 button in the header lists the last 20 folders you visited and files you
   opened, newest first (folders open, files preview); remove one entry or clear the list
 - Settings: the ⚙ button in the header toggles hidden (dot) folders and files, opens
-  Server info, and clears tags, favorites or recent items in one confirmed step
+  Server info, and clears tags, favorites, recent items or hidden marks in one confirmed step
+- Hide entries: any file or folder can be hidden from its context menu (Hide / Unhide);
+  hidden rows disappear from listings and shortcuts, and "Show hidden files" reveals them
+  dimmed with a badge so they can be unhidden
 - Folder colours: pick one of eight swatches from a folder's context menu and its icon is
   drawn in that colour (remembered per browser)
 - Folder tags: the 🏷 button in the header groups every coloured folder by colour (one

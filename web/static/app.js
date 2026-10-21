@@ -265,6 +265,14 @@
   // Dot entries are hidden by default; the settings menu toggles them.
   let showHidden = loadStored("showHidden", false) === true;
 
+  // Entries hidden by hand (context menu) are listed again when showHidden is
+  // on, so they can be unhidden. Dot entries are a server-side concern.
+  let hiddenPaths = loadStored("hiddenPaths", []);
+  if (!Array.isArray(hiddenPaths)) hiddenPaths = [];
+  hiddenPaths = hiddenPaths.filter(function (path) {
+    return typeof path === "string" && path.indexOf("/") === 0 && path !== "/";
+  });
+
   // Favorites (folders and files) are listed in the header for quick access.
   let favorites = loadStored("favorites", []);
   if (!Array.isArray(favorites)) favorites = [];
@@ -410,6 +418,23 @@
     setStatus("Cleared " + count + " " + (count === 1 ? "favorite." : "favorites."), false);
   }
 
+  async function clearHidden() {
+    const count = hiddenPaths.length;
+    if (count === 0) return;
+    const ok = await confirmDialog({
+      title: "Clear hidden",
+      message:
+        "Unhide all " + count + " hidden " + (count === 1 ? "item" : "items") +
+        "? They will appear in their folders again.",
+      confirmLabel: "Unhide all",
+    });
+    if (!ok) return;
+    hiddenPaths = [];
+    saveStored("hiddenPaths", hiddenPaths);
+    renderList();
+    setStatus("Unhid " + count + " " + (count === 1 ? "item." : "items."), false);
+  }
+
   async function clearTags() {
     const count = taggedFolders().length;
     if (count === 0) return;
@@ -426,6 +451,24 @@
     updateTagsButton();
     renderList();
     setStatus("Cleared " + count + " folder " + (count === 1 ? "tag." : "tags."), false);
+  }
+
+  function isHidden(path) {
+    return hiddenPaths.indexOf(path) !== -1;
+  }
+
+  function toggleHiddenEntry(entry) {
+    const wasHidden = isHidden(entry.path);
+    if (wasHidden) {
+      hiddenPaths = hiddenPaths.filter(function (path) {
+        return path !== entry.path;
+      });
+    } else {
+      hiddenPaths = hiddenPaths.concat([entry.path]);
+    }
+    saveStored("hiddenPaths", hiddenPaths);
+    renderList();
+    setStatus((wasHidden ? "Unhid " : "Hid ") + '"' + entry.name + '".', false);
   }
 
   function isPinned(path) {
@@ -551,7 +594,7 @@
     return [
       {
         label: "Show hidden files",
-        title: "Folders and files whose name starts with a dot",
+        title: "Dot entries and entries you hid from the context menu",
         icon: "eye",
         checked: showHidden,
         action: toggleHidden,
@@ -579,6 +622,13 @@
         danger: true,
         disabled: recent.length === 0,
         action: clearRecentItems,
+      },
+      {
+        label: clearLabel("Clear hidden", hiddenPaths.length),
+        icon: "eyeOff",
+        danger: true,
+        disabled: hiddenPaths.length === 0,
+        action: clearHidden,
       },
     ];
   }
@@ -633,6 +683,14 @@
       saveStored("favorites", favorites);
       updateFavoritesButton();
     }
+
+    let hiddenChanged = false;
+    hiddenPaths = hiddenPaths.map(function (path) {
+      const mapped = remapPath(path, oldPath, newPath);
+      if (mapped !== path) hiddenChanged = true;
+      return mapped;
+    });
+    if (hiddenChanged) saveStored("hiddenPaths", hiddenPaths);
 
     let recentChanged = false;
     recent = recent.map(function (item) {
@@ -701,6 +759,12 @@
       saveStored("folderColors", folderColors);
       updateTagsButton();
     }
+
+    const hiddenBefore = hiddenPaths.length;
+    hiddenPaths = hiddenPaths.filter(function (candidate) {
+      return keep(candidate);
+    });
+    if (hiddenPaths.length !== hiddenBefore) saveStored("hiddenPaths", hiddenPaths);
   }
 
   // --- helpers ---
@@ -946,9 +1010,18 @@
     renderList();
   }
 
+  // Hidden entries (and dot entries, which the server omits) are left out
+  // unless "Show hidden files" is on.
+  function shownEntries() {
+    if (showHidden) return currentEntries;
+    return currentEntries.filter(function (entry) {
+      return !isHidden(entry.path);
+    });
+  }
+
   function visibleEntries() {
     const query = filterText.trim().toLowerCase();
-    let list = currentEntries;
+    let list = shownEntries();
     if (query) {
       list = list.filter(function (e) {
         return e.name.toLowerCase().indexOf(query) !== -1;
@@ -1199,6 +1272,7 @@
     return pinnedFolders
       .filter(function (item) {
         if (item.path === currentPath) return false;
+        if (!showHidden && isHidden(item.path)) return false;
         return !query || item.name.toLowerCase().indexOf(query) !== -1;
       })
       .map(function (item) {
@@ -1224,7 +1298,7 @@
   function renderList() {
     updateSortIndicators();
     const visible = visibleEntries();
-    updateCount(currentEntries.length, visible.length);
+    updateCount(shownEntries().length, visible.length);
     const entries = excludePinned(visible);
     if (viewMode === "grid") renderGrid(entries);
     else renderTable(entries);
@@ -1274,6 +1348,7 @@
     const tr = document.createElement("tr");
     tr.className = entry.isDir ? "dir" : "file";
     if (pinned) tr.classList.add("pinned-row");
+    if (isHidden(entry.path)) tr.classList.add("is-hidden");
     tr.dataset.path = entry.path;
 
     columns.forEach(function (col) {
@@ -1320,6 +1395,7 @@
   function appendEntryBadges(wrap, entry, pinned) {
     if (pinned) wrap.appendChild(menuIcon("pin", "pin-badge"));
     if (isFavorite(entry.path)) wrap.appendChild(menuIcon("star", "favorite-badge"));
+    if (isHidden(entry.path)) wrap.appendChild(menuIcon("eyeOff", "hidden-badge"));
   }
 
   function renderCell(col, entry, pinned) {
@@ -1548,6 +1624,7 @@
     const card = document.createElement("div");
     card.className = "card " + (entry.isDir ? "dir" : "file");
     if (pinned) card.classList.add("pinned-card");
+    if (isHidden(entry.path)) card.classList.add("is-hidden");
     card.tabIndex = 0;
 
     const icon = document.createElement("div");
@@ -1563,6 +1640,7 @@
     badges.className = "card-badges";
     if (pinned) badges.appendChild(menuIcon("pin", "pin-badge"));
     if (isFavorite(entry.path)) badges.appendChild(menuIcon("star", "favorite-badge"));
+    if (isHidden(entry.path)) badges.appendChild(menuIcon("eyeOff", "hidden-badge"));
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
@@ -2106,6 +2184,7 @@
     properties: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
     tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
     eye: '<path d="M2.5 12s3.6-6.5 9.5-6.5S21.5 12 21.5 12s-3.6 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>',
+    eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 6.1A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.8 3.7"/><path d="M6.4 6.9C3.9 8.7 2.5 12 2.5 12s3.5 6.5 9.5 6.5c1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
     pin: '<path d="M12 17v5"/><path d="M15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1v3.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76z"/>',
     star: '<path d="M12 3.6l2.6 5.3 5.8.8-4.2 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.6 9.7l5.8-.8z"/>',
@@ -2369,6 +2448,12 @@
   }
 
   function showContextMenu(x, y, entry) {
+    const hidden = isHidden(entry.path);
+    const hideItem = {
+      label: hidden ? "Unhide" : "Hide",
+      icon: hidden ? "eye" : "eyeOff",
+      action: function () { toggleHiddenEntry(entry); },
+    };
     const favoriteItem = {
       label: isFavorite(entry.path) ? "Remove from favorites" : "Add to favorites",
       icon: "star",
@@ -2391,6 +2476,7 @@
             onPick: function (color) { setFolderColor(entry, color); },
           },
           { separator: true },
+          hideItem,
           { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ]
@@ -2400,6 +2486,7 @@
           favoriteItem,
           { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
           { separator: true },
+          hideItem,
           { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ];
