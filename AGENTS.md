@@ -43,7 +43,7 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - `internal/config` — env/`.env` loading. Precedence: **process env > `.env` > defaults**.
   `.env` is read from the current working directory.
 - `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`,
-  `Delete`, `Mkdir`, `Rename`, `Move`, `Create`, `Write`, `Upload`, `Disk`). This is the security
+  `Delete`, `Mkdir`, `Rename`, `Move`, `Copy`, `Create`, `Write`, `Upload`, `Disk`). This is the security
   boundary; test changes here.
 - `internal/server` — HTTP routes, authentication (login form + sessions), JSON/error
   handling.
@@ -75,13 +75,15 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - `/api/read` refuses files over `files.MaxReadSize` (2 MiB) so callers download instead.
   `/api/list` omits entries whose name starts with a dot unless `hidden=1` is passed; the
   UI sends it only when the settings toggle is on (default: hidden).
-- Every mutation (delete, mkdir, rename, create, write, upload) uses `resolveTarget`
+- Every mutation (delete, mkdir, rename, move, copy, create, write, upload) uses `resolveTarget`
   (not `resolve`): it resolves the parent but never the final element, so operating on a
   symlink affects the link and leaves its target intact, even when the target is outside
   the root. `Write` additionally refuses a symlink target outright (`ErrForbidden`, 403).
   Operating on the root returns `ErrRootOperation` (400), as does an invalid new name
-  (`ErrInvalidName`). A non-empty directory without `recursive=true` returns
-  `ErrDirNotEmpty` (409); `Mkdir`/`Rename`/`Create`/`Upload` onto an existing path returns
+  (`ErrInvalidName`) and moving/copying a folder into its own subtree
+  (`ErrMoveIntoSelf`/`ErrCopyIntoSelf`) or copying a special file (`ErrUnsupported`). A
+  non-empty directory without `recursive=true` returns `ErrDirNotEmpty` (409);
+  `Mkdir`/`Rename`/`Create`/`Upload`/`Move`/`Copy` onto an existing path returns
   `os.ErrExist` (409) and a missing source/parent returns `os.ErrNotExist` (404).
 - Size limits: `files.MaxReadSize` (2 MiB, `/api/read`), `files.MaxWriteSize` (8 MiB,
   `/api/write` body), `files.MaxUploadSize` (50 MiB, `/api/upload`). Overwriting is never
@@ -89,17 +91,24 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   upload over the limit is rejected by `MaxBytesReader` and mapped to `413` with a
   "larger than the 50 MB limit" message (the limit is on the **whole multipart body**, so
   it includes MIME framing overhead).
-- Move is a cross-folder rename: `POST /api/move?from=/a&to=/b/a` calls `files.Move`,
-  which resolves both ends with `resolveTarget` (so a symlink moves as a link), refuses
-  the root, requires the destination folder to exist (404), refuses an existing
-  destination (409) and refuses moving a folder into itself or its subtree (`ErrMoveIntoSelf`,
-  400, compared on cleaned relative paths with a trailing slash so `/docs2` is not treated
-  as `/docs`). In `app.js` the context menu's "Move to…" opens `#move-modal`: a small folder
-  picker that starts at the entry's parent, lists only folders from `/api/list` (excluding
-  the entry itself, so its subtree can never be entered), focuses the first row, and keeps
-  "Move here" disabled while the shown folder is the entry's current parent. Confirming
-  calls `rekeyFolderPaths()` so pins, favorites, tags, notes, hidden marks and recents
-  follow the move, then refreshes the listing.
+- Move and copy share one destination picker (`#destination-modal`). "Move to…" and
+  "Copy to…" in the context menu call `openPicker(entry, "move"|"copy")`; it starts at the
+  entry's parent, lists only folders from `/api/list` (excluding the entry itself, so its
+  subtree can never be entered), focuses the first row, and swaps the title and OK label
+  ("Move here"/"Copy here"). Move is disabled while the shown folder is the current parent;
+  copy is allowed there and duplicates under `uniqueCopyName()` ("note copy.txt", then
+  "note copy 2.txt"), shown in the hint. Confirming posts to `/api/move` or `/api/copy`,
+  refreshes the listing and, for moves only, runs `rekeyFolderPaths()` so pins, favorites,
+  tags, notes, hidden marks and recents follow the subtree. A copy inherits none of them.
+- `POST /api/move?from=/a&to=/b/a` calls `files.Move`; `POST /api/copy?...` calls
+  `files.Copy`. Both resolve each end with `resolveTarget` (symlinks are handled as links,
+  never followed), refuse the root, require the destination folder to exist (404), refuse
+  an existing destination (409) and refuse a folder into itself or its subtree
+  (`ErrMoveIntoSelf`/`ErrCopyIntoSelf`, 400, compared on cleaned relative paths with a
+  trailing slash so `/docs2` is not treated as `/docs`). Copy is recursive, preserves
+  permission bits (directories get owner access while filling, then are chmod'ed back),
+  recreates symlinks with `os.Readlink`+`os.Symlink`, refuses special files
+  (`ErrUnsupported`), and removes a partial destination if anything fails.
 - Navigation is in-page only: `navigate()` never calls `history.pushState`, so the browser
   Back button leaves the app. The in-app `#nav-back` arrow uses its own `navHistory` stack
   (capped at 50): it returns to the previous folder, falls back to the parent when the

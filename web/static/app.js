@@ -66,14 +66,14 @@
     tagsToggle: document.getElementById("tags-toggle"),
     settingsToggle: document.getElementById("settings-toggle"),
     notesToggle: document.getElementById("notes-toggle"),
-    moveModal: document.getElementById("move-modal"),
-    moveTitle: document.getElementById("move-title"),
-    moveName: document.getElementById("move-name"),
-    movePath: document.getElementById("move-path"),
-    moveList: document.getElementById("move-list"),
-    moveHint: document.getElementById("move-hint"),
-    moveOk: document.getElementById("move-ok"),
-    moveCancel: document.getElementById("move-cancel"),
+    destinationModal: document.getElementById("destination-modal"),
+    destinationTitle: document.getElementById("destination-title"),
+    destinationName: document.getElementById("destination-name"),
+    destinationPath: document.getElementById("destination-path"),
+    destinationList: document.getElementById("destination-list"),
+    destinationHint: document.getElementById("destination-hint"),
+    destinationOk: document.getElementById("destination-ok"),
+    destinationCancel: document.getElementById("destination-cancel"),
     noteModal: document.getElementById("note-modal"),
     noteName: document.getElementById("note-name"),
     noteText: document.getElementById("note-text"),
@@ -1065,6 +1065,13 @@
     return sendJSON(
       "POST",
       "/api/move?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)
+    );
+  }
+
+  function apiCopy(from, to) {
+    return sendJSON(
+      "POST",
+      "/api/copy?from=" + encodeURIComponent(from) + "&to=" + encodeURIComponent(to)
     );
   }
 
@@ -2158,39 +2165,69 @@
     }
   }
 
-  // --- move: pick a destination folder, then rename across folders ---
-  let moveEntry = null;
-  let movePath = "/";
-  let moveSeq = 0;
+  // --- destination picker (shared by Move and Copy) ---
+  let pickerEntry = null;
+  let pickerMode = "move";
+  let pickerPath = "/";
+  let pickerEntries = [];
+  let pickerSeq = 0;
 
   function parentOf(path) {
     const index = path.lastIndexOf("/");
     return index <= 0 ? "/" : path.slice(0, index);
   }
 
-  function openMove(entry) {
-    moveEntry = { name: entry.name, path: entry.path, isDir: !!entry.isDir };
-    movePath = parentOf(entry.path);
-    els.moveTitle.textContent = entry.isDir ? "Move folder" : "Move file";
-    els.moveName.textContent = entry.path;
-    els.moveModal.hidden = false;
-    loadMoveFolders();
+  function openPicker(entry, mode) {
+    pickerMode = mode;
+    pickerEntry = { name: entry.name, path: entry.path, isDir: !!entry.isDir };
+    pickerPath = parentOf(entry.path);
+    els.destinationTitle.textContent =
+      (mode === "move" ? "Move " : "Copy ") + (entry.isDir ? "folder" : "file");
+    els.destinationName.textContent = entry.path;
+    els.destinationOk.textContent = mode === "move" ? "Move here" : "Copy here";
+    els.destinationModal.hidden = false;
+    loadPickerFolders();
   }
 
-  function closeMove() {
-    moveSeq++;
-    els.moveModal.hidden = true;
-    moveEntry = null;
+  function closePicker() {
+    pickerSeq++;
+    els.destinationModal.hidden = true;
+    pickerEntry = null;
   }
 
-  function moveRow(kind, label, path) {
+  // "note.txt" -> "note copy.txt", then "note copy 2.txt", skipping names that
+  // already exist in the destination.
+  function uniqueCopyName(entry, entries) {
+    const taken = {};
+    (entries || []).forEach(function (item) {
+      taken[item.name] = true;
+    });
+    let base = entry.name;
+    let ext = "";
+    if (!entry.isDir) {
+      const dot = entry.name.lastIndexOf(".");
+      if (dot > 0) {
+        base = entry.name.slice(0, dot);
+        ext = entry.name.slice(dot);
+      }
+    }
+    let name = base + " copy" + ext;
+    let n = 2;
+    while (taken[name]) {
+      name = base + " copy " + n + ext;
+      n++;
+    }
+    return name;
+  }
+
+  function pickerRow(kind, label, path) {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "move-row" + (kind === "up" ? " move-up" : "");
+    button.className = "picker-row" + (kind === "up" ? " picker-up" : "");
     button.dataset.path = path;
 
     if (kind === "up") {
-      button.appendChild(menuIcon("up", "move-up-icon"));
+      button.appendChild(menuIcon("up", "picker-up-icon"));
     } else {
       const icon = document.createElement("span");
       icon.className = "folder-icon";
@@ -2199,92 +2236,116 @@
     }
 
     const text = document.createElement("span");
-    text.className = "move-name";
+    text.className = "picker-name";
     text.textContent = label;
     text.title = path;
     button.appendChild(text);
 
     button.addEventListener("click", function () {
-      movePath = path;
-      loadMoveFolders();
+      pickerPath = path;
+      loadPickerFolders();
     });
     return button;
   }
 
-  async function loadMoveFolders() {
-    const seq = ++moveSeq;
-    els.movePath.textContent = movePath;
-    els.movePath.title = movePath;
-    els.moveList.textContent = "";
-    els.moveHint.textContent = "Loading…";
-    els.moveOk.disabled = true;
+  async function loadPickerFolders() {
+    const seq = ++pickerSeq;
+    els.destinationPath.textContent = pickerPath;
+    els.destinationPath.title = pickerPath;
+    els.destinationList.textContent = "";
+    els.destinationHint.textContent = "Loading…";
+    els.destinationOk.disabled = true;
     try {
-      const data = await api("/api/list", movePath, showHidden ? "&hidden=1" : "");
-      if (seq !== moveSeq) return;
-      renderMoveList(data.path, data.entries);
+      const data = await api("/api/list", pickerPath, showHidden ? "&hidden=1" : "");
+      if (seq !== pickerSeq) return;
+      renderPickerList(data.path, data.entries);
     } catch (err) {
-      if (seq !== moveSeq) return;
-      els.moveHint.textContent = "Cannot open this folder: " + err.message;
+      if (seq !== pickerSeq) return;
+      els.destinationHint.textContent = "Cannot open this folder: " + err.message;
     }
   }
 
-  function renderMoveList(path, entries) {
-    movePath = path;
-    els.movePath.textContent = path;
-    els.movePath.title = path;
-    els.moveList.textContent = "";
+  function renderPickerList(path, entries) {
+    pickerPath = path;
+    pickerEntries = entries;
+    els.destinationPath.textContent = path;
+    els.destinationPath.title = path;
+    els.destinationList.textContent = "";
 
     if (path !== "/") {
-      els.moveList.appendChild(moveRow("up", "Up", parentOf(path)));
+      els.destinationList.appendChild(pickerRow("up", "Up", parentOf(path)));
     }
     const folders = entries.filter(function (entry) {
-      // Never offer the entry being moved as its own destination (or a way in).
-      return entry.isDir && (!moveEntry || entry.path !== moveEntry.path);
+      // Never offer the entry being moved or copied as its own destination.
+      return entry.isDir && (!pickerEntry || entry.path !== pickerEntry.path);
     });
     folders.forEach(function (folder) {
-      els.moveList.appendChild(moveRow("folder", folder.name, folder.path));
+      els.destinationList.appendChild(pickerRow("folder", folder.name, folder.path));
     });
     if (folders.length === 0) {
       const empty = document.createElement("div");
-      empty.className = "move-empty";
+      empty.className = "picker-empty";
       empty.textContent = "No folders here.";
-      els.moveList.appendChild(empty);
+      els.destinationList.appendChild(empty);
     }
 
-    updateMoveState();
+    updatePickerState();
 
-    const first = els.moveList.querySelector("button.move-row");
+    const first = els.destinationList.querySelector("button.picker-row");
     if (first) first.focus({ preventScroll: true });
   }
 
-  function updateMoveState() {
-    if (!moveEntry) return;
-    const same = parentOf(moveEntry.path) === movePath;
-    els.moveOk.disabled = same;
-    if (same) {
-      els.moveHint.textContent = "Already in this folder — open another one below.";
+  function updatePickerState() {
+    if (!pickerEntry) return;
+    const here = parentOf(pickerEntry.path) === pickerPath;
+    if (pickerMode === "move" && here) {
+      els.destinationOk.disabled = true;
+      els.destinationHint.textContent = "Already in this folder — open another one below.";
       return;
     }
-    const label = movePath === "/" ? "Home" : pathName(movePath);
-    els.moveHint.textContent =
-      'Open a folder to go deeper, or move into "' + label + '".';
+    els.destinationOk.disabled = false;
+    if (pickerMode === "copy" && here) {
+      // Copying into the same folder duplicates the entry under a new name.
+      els.destinationHint.textContent =
+        'Copy as "' + uniqueCopyName(pickerEntry, pickerEntries) + '", or open another folder.';
+      return;
+    }
+    const label = pickerPath === "/" ? "Home" : pathName(pickerPath);
+    els.destinationHint.textContent =
+      "Open a folder to go deeper, or " +
+      (pickerMode === "move" ? "move" : "copy") +
+      ' into "' +
+      label +
+      '".';
   }
 
-  async function confirmMove() {
-    if (!moveEntry || els.moveOk.disabled) return;
-    const entry = moveEntry;
-    const destinationDir = movePath;
-    const destination =
-      destinationDir === "/" ? "/" + entry.name : destinationDir + "/" + entry.name;
+  async function confirmPicker() {
+    if (!pickerEntry || els.destinationOk.disabled) return;
+    const entry = pickerEntry;
+    const mode = pickerMode;
+    const dir = pickerPath;
+    const here = parentOf(entry.path) === dir;
+    const name = mode === "copy" && here ? uniqueCopyName(entry, pickerEntries) : entry.name;
+    const destination = dir === "/" ? "/" + name : dir + "/" + name;
     try {
-      await apiMove(entry.path, destination);
-      closeMove();
-      rekeyFolderPaths(entry.path, destination);
+      if (mode === "move") {
+        await apiMove(entry.path, destination);
+      } else {
+        await apiCopy(entry.path, destination);
+      }
+      closePicker();
+      if (mode === "move") rekeyFolderPaths(entry.path, destination);
       closeViewer();
       await navigate(currentPath);
-      setStatus('Moved "' + entry.name + '" to ' + destinationDir + ".", false);
+      if (mode === "move") {
+        setStatus('Moved "' + entry.name + '" to ' + dir + ".", false);
+      } else if (name !== entry.name) {
+        setStatus('Copied "' + entry.name + '" as "' + name + '".', false);
+      } else {
+        setStatus('Copied "' + entry.name + '" to ' + dir + ".", false);
+      }
     } catch (err) {
-      setStatus("Failed to move: " + err.message, true);
+      setStatus("Failed to " + mode + ": " + err.message, true);
     }
   }
 
@@ -2514,6 +2575,7 @@
     preview: '<path d="M2.5 12S6 6 12 6s9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6z"/><circle cx="12" cy="12" r="3"/>',
     rename: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
     move: '<path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.5h6A1.5 1.5 0 0 1 18 10v8.5A1.5 1.5 0 0 1 16.5 20h-12A1.5 1.5 0 0 1 3 18.5z"/><path d="M11 13.5h6.5M14.5 10.5l3 3-3 3"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4.5A1.5 1.5 0 0 1 3 13.5v-9A1.5 1.5 0 0 1 4.5 3h9A1.5 1.5 0 0 1 15 4.5V5"/>',
     up: '<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>',
     download: '<path d="M12 4v11"/><path d="M7 10.5l5 5 5-5"/><path d="M5 20h14"/>',
     delete: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/>',
@@ -2812,7 +2874,12 @@
     const moveItem = {
       label: "Move to…",
       icon: "move",
-      action: function () { openMove(entry); },
+      action: function () { openPicker(entry, "move"); },
+    };
+    const copyItem = {
+      label: "Copy to…",
+      icon: "copy",
+      action: function () { openPicker(entry, "copy"); },
     };
     const noteItem = {
       label: noteFor(entry.path) ? "Edit note" : "Add note",
@@ -2829,6 +2896,7 @@
           { label: "Open", icon: "open", action: function () { navigate(entry.path); } },
           { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
           moveItem,
+          copyItem,
           favoriteItem,
           { separator: true },
           {
@@ -2851,6 +2919,7 @@
           { label: "Preview", icon: "preview", action: function () { openFile(entry); } },
           { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
           moveItem,
+          copyItem,
           favoriteItem,
           { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
           { separator: true },
@@ -3072,10 +3141,10 @@
     if (e.target === els.uploadModal && !uploadRequest) closeUploadModal();
   });
 
-  els.moveOk.addEventListener("click", confirmMove);
-  els.moveCancel.addEventListener("click", closeMove);
-  els.moveModal.addEventListener("click", function (e) {
-    if (e.target === els.moveModal) closeMove();
+  els.destinationOk.addEventListener("click", confirmPicker);
+  els.destinationCancel.addEventListener("click", closePicker);
+  els.destinationModal.addEventListener("click", function (e) {
+    if (e.target === els.destinationModal) closePicker();
   });
 
   els.noteSave.addEventListener("click", saveNote);
@@ -3109,8 +3178,8 @@
       closeProperties();
     } else if (e.key === "Escape" && !els.noteModal.hidden) {
       closeNote();
-    } else if (e.key === "Escape" && !els.moveModal.hidden) {
-      closeMove();
+    } else if (e.key === "Escape" && !els.destinationModal.hidden) {
+      closePicker();
     } else if (e.key === "Escape" && !els.viewer.hidden) {
       if (editing) cancelEdit();
       else closeViewer();

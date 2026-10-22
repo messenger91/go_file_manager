@@ -36,6 +36,9 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Move: any file or folder can be moved to another folder from its context menu; a folder
   picker starts in the current folder, files are never offered as destinations, and
   shortcuts, tags, notes and hidden marks follow the moved subtree
+- Copy: copy files and folders (including their contents) to another folder, or duplicate
+  them in place as "name copy" / "name copy 2" — symlinks are copied as links, and an
+  existing destination is never overwritten
 - Hide entries: any file or folder can be hidden from its context menu (Hide / Unhide);
   hidden rows disappear from listings and shortcuts, and "Show hidden files" reveals them
   dimmed with a badge so they can be unhidden
@@ -257,6 +260,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | POST   | `/api/mkdir`    | Create a folder                      |
 | POST   | `/api/rename`   | Rename a file or folder in place     |
 | POST   | `/api/move`     | Move a file or folder to another path|
+| POST   | `/api/copy`     | Copy a file or folder to another path|
 | POST   | `/api/create`   | Create an empty file                 |
 | PUT    | `/api/write`    | Overwrite a file (body is new content)|
 | POST   | `/api/upload`   | Upload one or more files (multipart) |
@@ -277,6 +281,11 @@ cannot be created.
 changing its name. Both paths are root-relative; the destination folder must
 exist (`404` otherwise), an existing destination returns `409`, and moving a
 folder into itself or its own subtree returns `400`.
+
+`POST /api/copy?from=/sub/old.txt&to=/other/old.txt` copies a file or, for
+folders, the whole subtree. Symlinks are copied as links and never followed; a
+failed copy removes the partial destination. The same `404`/`409`/`400` rules
+apply.
 
 `POST /api/create?path=/sub/note.txt` creates an empty file (`409` if it exists).
 `PUT /api/write?path=/sub/note.txt` replaces a file's contents with the raw

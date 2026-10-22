@@ -58,6 +58,7 @@ func (s *Server) Handler() http.Handler {
 	app.HandleFunc("POST /api/mkdir", s.handleMkdir)
 	app.HandleFunc("POST /api/rename", s.handleRename)
 	app.HandleFunc("POST /api/move", s.handleMove)
+	app.HandleFunc("POST /api/copy", s.handleCopy)
 	app.HandleFunc("POST /api/create", s.handleCreate)
 	app.HandleFunc("PUT /api/write", s.handleWrite)
 	app.HandleFunc("POST /api/upload", s.handleUpload)
@@ -233,6 +234,17 @@ func (s *Server) handleMove(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"from": from, "to": to, "path": to})
 }
 
+func (s *Server) handleCopy(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+	from := query.Get("from")
+	to := query.Get("to")
+	if err := s.fm.Copy(from, to); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"from": from, "to": to, "path": to})
+}
+
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
 	if err := s.fm.Create(rel); err != nil {
@@ -312,7 +324,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 	case errors.Is(err, os.ErrNotExist):
 		status = http.StatusNotFound
 	case errors.Is(err, files.ErrRootOperation), errors.Is(err, files.ErrInvalidName),
-		errors.Is(err, files.ErrMoveIntoSelf):
+		errors.Is(err, files.ErrMoveIntoSelf), errors.Is(err, files.ErrCopyIntoSelf),
+		errors.Is(err, files.ErrUnsupported):
 		status = http.StatusBadRequest
 	case errors.Is(err, files.ErrDirNotEmpty), errors.Is(err, os.ErrExist):
 		status = http.StatusConflict

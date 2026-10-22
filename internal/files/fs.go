@@ -25,6 +25,11 @@ var (
 	ErrInvalidName = errors.New("invalid name")
 	// ErrMoveIntoSelf is returned when a folder is moved into its own subtree.
 	ErrMoveIntoSelf = errors.New("cannot move a folder into itself")
+	// ErrCopyIntoSelf is returned when a folder is copied into its own subtree.
+	ErrCopyIntoSelf = errors.New("cannot copy a folder into itself")
+	// ErrUnsupported is returned for entries that cannot be copied (sockets,
+	// devices, FIFOs).
+	ErrUnsupported = errors.New("copying this file type is not supported")
 )
 
 // MaxReadSize is the largest file the API will return as a text preview.
@@ -291,6 +296,105 @@ func (f *FS) Move(from, to string) error {
 		return os.ErrExist
 	}
 	return os.Rename(fromFull, toFull)
+}
+
+// Copy copies the entry at from to the full path to, recursively for folders.
+// Symlinks are recreated as links and never followed, so a link cannot pull
+// content in from outside the root. The destination must not exist, its parent
+// must exist, and a folder cannot be copied into itself or its own subtree. A
+// failed copy removes whatever was written so far.
+func (f *FS) Copy(from, to string) error {
+	fromFull, err := f.resolveTarget(from)
+	if err != nil {
+		return err
+	}
+	toFull, err := f.resolveTarget(to)
+	if err != nil {
+		return err
+	}
+	if fromFull == toFull {
+		return os.ErrExist
+	}
+	if !validName(filepath.Base(toFull)) {
+		return ErrInvalidName
+	}
+	info, err := os.Lstat(fromFull)
+	if err != nil {
+		return err
+	}
+	fromRel := path.Clean("/" + strings.TrimSpace(from))
+	toRel := path.Clean("/" + strings.TrimSpace(to))
+	if info.IsDir() && strings.HasPrefix(toRel+"/", fromRel+"/") {
+		return ErrCopyIntoSelf
+	}
+	parent, err := os.Stat(filepath.Dir(toFull))
+	if err != nil {
+		return err
+	}
+	if !parent.IsDir() {
+		return os.ErrNotExist
+	}
+	if _, err := os.Lstat(toFull); err == nil {
+		return os.ErrExist
+	}
+	if err := copyEntry(fromFull, toFull, info); err != nil {
+		_ = os.RemoveAll(toFull)
+		return err
+	}
+	return nil
+}
+
+// copyEntry copies one entry, recursing into directories.
+func copyEntry(src, dst string, info os.FileInfo) error {
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(src)
+		if err != nil {
+			return err
+		}
+		return os.Symlink(target, dst)
+	case info.IsDir():
+		// Add owner access while filling so a read-only source directory can
+		// still receive its children; the final mode is restored afterwards.
+		if err := os.Mkdir(dst, info.Mode().Perm()|0o700); err != nil {
+			return err
+		}
+		entries, err := os.ReadDir(src)
+		if err != nil {
+			return err
+		}
+		for _, entry := range entries {
+			childInfo, err := entry.Info()
+			if err != nil {
+				return err
+			}
+			if err := copyEntry(filepath.Join(src, entry.Name()), filepath.Join(dst, entry.Name()), childInfo); err != nil {
+				return err
+			}
+		}
+		return os.Chmod(dst, info.Mode().Perm())
+	case info.Mode().IsRegular():
+		return copyFile(src, dst, info)
+	default:
+		return ErrUnsupported
+	}
+}
+
+func copyFile(src, dst string, info os.FileInfo) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }
 
 // validName reports whether name is usable as a single file/folder name.

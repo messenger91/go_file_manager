@@ -226,19 +226,24 @@
     </div>
   </div>
 
-  <div class="modal" id="move-modal" hidden>
-    <div class="modal-panel move-panel" role="dialog" aria-modal="true" aria-labelledby="move-title">
-      <h2 class="modal-title" id="move-title">Move</h2>
-      <p class="modal-subtitle" id="move-name"></p>
-      <div class="move-dest">
-        <span class="move-dest-label">Destination</span>
-        <span class="move-path" id="move-path"></span>
+  <div class="modal" id="destination-modal" hidden>
+    <div
+      class="modal-panel picker-panel"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="destination-title"
+    >
+      <h2 class="modal-title" id="destination-title">Move</h2>
+      <p class="modal-subtitle" id="destination-name"></p>
+      <div class="picker-dest">
+        <span class="picker-dest-label">Destination</span>
+        <span class="picker-path" id="destination-path"></span>
       </div>
-      <div class="move-list" id="move-list" role="group" aria-label="Folders"></div>
-      <p class="move-hint" id="move-hint"></p>
+      <div class="picker-list" id="destination-list" role="group" aria-label="Folders"></div>
+      <p class="picker-hint" id="destination-hint"></p>
       <div class="modal-actions">
-        <button id="move-cancel" class="btn" type="button">Cancel</button>
-        <button id="move-ok" class="btn primary" type="button">Move here</button>
+        <button id="destination-cancel" class="btn" type="button">Cancel</button>
+        <button id="destination-ok" class="btn primary" type="button">Move here</button>
       </div>
     </div>
   </div>

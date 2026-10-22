@@ -635,3 +635,180 @@ func TestMoveSymlinkMovesLinkOnly(t *testing.T) {
 		t.Fatalf("link target changed: %q, %v", data, err)
 	}
 }
+
+func TestCopyFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("payload"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Copy("/a.txt", "/dest/a.txt"); err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dest", "a.txt"))
+	if err != nil || string(data) != "payload" {
+		t.Fatalf("copied file = %q, %v; want payload", data, err)
+	}
+	// The source stays in place.
+	if data, err := os.ReadFile(filepath.Join(root, "a.txt")); err != nil || string(data) != "payload" {
+		t.Fatalf("source changed: %q, %v", data, err)
+	}
+	info, err := os.Stat(filepath.Join(root, "dest", "a.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("copied mode = %v, want 0640", info.Mode().Perm())
+	}
+}
+
+func TestCopyDirectoryRecursive(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "nested", "note.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A read-only directory must still receive its children. Restore write
+	// access afterwards so TempDir cleanup can remove the tree.
+	if err := os.Chmod(filepath.Join(root, "docs", "nested"), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(filepath.Join(root, "docs", "nested"), 0o755)
+		_ = os.Chmod(filepath.Join(root, "dest", "docs", "nested"), 0o755)
+	})
+	if err := os.Mkdir(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Copy("/docs", "/dest/docs"); err != nil {
+		t.Fatalf("copy dir: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "dest", "docs", "nested", "note.txt"))
+	if err != nil || string(data) != "hi" {
+		t.Fatalf("nested copy = %q, %v; want hi", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "docs", "nested", "note.txt")); err != nil {
+		t.Fatalf("source lost a file: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, "dest", "docs", "nested"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o555 {
+		t.Fatalf("copied dir mode = %v, want 0555", info.Mode().Perm())
+	}
+}
+
+func TestCopyFolderIntoItselfFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "docs2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Copy("/docs", "/docs/sub/docs"); !errors.Is(err, ErrCopyIntoSelf) {
+		t.Fatalf("copy into itself error = %v, want ErrCopyIntoSelf", err)
+	}
+	if err := f.Copy("/docs", "/docs2/docs"); err != nil {
+		t.Fatalf("copy to sibling prefix: %v", err)
+	}
+}
+
+func TestCopyOntoExistingFails(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"a.txt", "dest/a.txt"} {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(root, name)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := New(root)
+
+	if err := f.Copy("/a.txt", "/dest/a.txt"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("copy onto existing error = %v, want os.ErrExist", err)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "dest", "a.txt")); string(data) != "dest/a.txt" {
+		t.Fatalf("existing destination changed")
+	}
+}
+
+func TestCopyMissingPathsFail(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Copy("/missing.txt", "/a.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing source error = %v, want os.ErrNotExist", err)
+	}
+	if err := f.Copy("/a.txt", "/nope/a.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing destination error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestCopyRootRejected(t *testing.T) {
+	f := New(t.TempDir())
+	if err := f.Copy("/", "/dest"); !errors.Is(err, ErrRootOperation) {
+		t.Fatalf("copy root error = %v, want ErrRootOperation", err)
+	}
+	if err := f.Copy("/a.txt", "/"); !errors.Is(err, ErrRootOperation) {
+		t.Fatalf("copy onto root error = %v, want ErrRootOperation", err)
+	}
+}
+
+func TestCopySamePathFails(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Copy("/a.txt", "/a.txt"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("copy onto itself error = %v, want os.ErrExist", err)
+	}
+}
+
+func TestCopySymlinkCopiesLink(t *testing.T) {
+	outside := t.TempDir()
+	target := filepath.Join(outside, "target.txt")
+	if err := os.WriteFile(target, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dest"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if err := f.Copy("/link", "/dest/link"); err != nil {
+		t.Fatalf("copy symlink: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(root, "dest", "link"))
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("copy is not a symlink: %v, %v", info, err)
+	}
+	got, err := os.Readlink(filepath.Join(root, "dest", "link"))
+	if err != nil || got != target {
+		t.Fatalf("copied link target = %q, %v; want %q", got, err, target)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "outside" {
+		t.Fatalf("link target changed: %q, %v", data, err)
+	}
+}
