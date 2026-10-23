@@ -812,3 +812,131 @@ func TestCopySymlinkCopiesLink(t *testing.T) {
 		t.Fatalf("link target changed: %q, %v", data, err)
 	}
 }
+
+func TestTrashMovesFileAndCreatesTrashFolder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("payload"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	to, err := f.Trash("/a.txt")
+	if err != nil {
+		t.Fatalf("trash: %v", err)
+	}
+	if to != "/"+TrashDir+"/a.txt" {
+		t.Fatalf("trashed path = %q, want /%s/a.txt", to, TrashDir)
+	}
+	if _, err := os.Stat(filepath.Join(root, "a.txt")); !os.IsNotExist(err) {
+		t.Fatalf("source still exists: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, TrashDir, "a.txt"))
+	if err != nil || string(data) != "payload" {
+		t.Fatalf("trashed file = %q, %v; want payload", data, err)
+	}
+}
+
+func TestTrashDirectoryKeepsContents(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "nested"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "nested", "note.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if _, err := f.Trash("/docs"); err != nil {
+		t.Fatalf("trash dir: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "docs")); !os.IsNotExist(err) {
+		t.Fatalf("source dir still exists: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, TrashDir, "docs", "nested", "note.txt"))
+	if err != nil || string(data) != "hi" {
+		t.Fatalf("nested file = %q, %v; want hi", data, err)
+	}
+}
+
+func TestTrashNameCollisionGetsUniqueName(t *testing.T) {
+	root := t.TempDir()
+	f := New(root)
+
+	for _, content := range []string{"first", "second", "third"} {
+		if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Trash("/a.txt"); err != nil {
+			t.Fatalf("trash %s: %v", content, err)
+		}
+	}
+	first, err := os.ReadFile(filepath.Join(root, TrashDir, "a.txt"))
+	if err != nil || string(first) != "first" {
+		t.Fatalf("a.txt = %q, %v; want first", first, err)
+	}
+	second, err := os.ReadFile(filepath.Join(root, TrashDir, "a 2.txt"))
+	if err != nil || string(second) != "second" {
+		t.Fatalf("a 2.txt = %q, %v; want second", second, err)
+	}
+	third, err := os.ReadFile(filepath.Join(root, TrashDir, "a 3.txt"))
+	if err != nil || string(third) != "third" {
+		t.Fatalf("a 3.txt = %q, %v; want third", third, err)
+	}
+}
+
+func TestTrashRootAndTrashItselfRejected(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, TrashDir, "old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, TrashDir+"-old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if _, err := f.Trash("/"); !errors.Is(err, ErrRootOperation) {
+		t.Fatalf("trash root error = %v, want ErrRootOperation", err)
+	}
+	if _, err := f.Trash("/" + TrashDir); !errors.Is(err, ErrInTrash) {
+		t.Fatalf("trash folder error = %v, want ErrInTrash", err)
+	}
+	if _, err := f.Trash("/" + TrashDir + "/old"); !errors.Is(err, ErrInTrash) {
+		t.Fatalf("entry inside trash error = %v, want ErrInTrash", err)
+	}
+	// A sibling whose name merely starts with the trash name is fine.
+	if _, err := f.Trash("/" + TrashDir + "-old"); err != nil {
+		t.Fatalf("trash sibling prefix: %v", err)
+	}
+}
+
+func TestTrashMissingFails(t *testing.T) {
+	f := New(t.TempDir())
+
+	if _, err := f.Trash("/missing.txt"); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("trash missing error = %v, want os.ErrNotExist", err)
+	}
+}
+
+func TestTrashSymlinkTrashesLinkOnly(t *testing.T) {
+	outside := t.TempDir()
+	target := filepath.Join(outside, "target.txt")
+	if err := os.WriteFile(target, []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(root, "link")); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if _, err := f.Trash("/link"); err != nil {
+		t.Fatalf("trash symlink: %v", err)
+	}
+	info, err := os.Lstat(filepath.Join(root, TrashDir, "link"))
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("trashed entry is not a symlink: %v, %v", info, err)
+	}
+	if data, err := os.ReadFile(target); err != nil || string(data) != "outside" {
+		t.Fatalf("link target changed: %q, %v", data, err)
+	}
+}

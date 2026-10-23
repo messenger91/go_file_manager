@@ -30,6 +30,9 @@ var (
 	// ErrUnsupported is returned for entries that cannot be copied (sockets,
 	// devices, FIFOs).
 	ErrUnsupported = errors.New("copying this file type is not supported")
+	// ErrInTrash is returned when trashing the trash folder itself or an entry
+	// that already lives inside it.
+	ErrInTrash = errors.New("path is already in the trash")
 )
 
 // MaxReadSize is the largest file the API will return as a text preview.
@@ -40,6 +43,10 @@ const MaxUploadSize = 50 << 20 // 50 MiB
 
 // MaxWriteSize is the largest body accepted when saving an edited file.
 const MaxWriteSize = 8 << 20 // 8 MiB
+
+// TrashDir is the name of the trash folder at the root. It starts with a dot,
+// so listings hide it unless hidden entries are requested.
+const TrashDir = ".trash"
 
 // Entry is a serialisable description of a file or directory.
 type Entry struct {
@@ -513,4 +520,57 @@ func (f *FS) Delete(rel string, recursive bool) error {
 		return ErrDirNotEmpty
 	}
 	return os.Remove(full)
+}
+
+// Trash moves the entry at rel into the trash folder (TrashDir at the root),
+// creating that folder on first use. It behaves like Move: the source goes
+// through resolveTarget, so a symlink is trashed as a link and its target is
+// left alone. Trashing the root, the trash folder itself or an entry already
+// inside it fails. If the trash folder already holds an entry with the same
+// name, " 2", " 3", … is inserted before the extension. The return value is
+// the trashed entry's new root-relative path.
+func (f *FS) Trash(rel string) (string, error) {
+	fromFull, err := f.resolveTarget(rel)
+	if err != nil {
+		return "", err
+	}
+	fromRel := path.Clean("/" + strings.TrimSpace(rel))
+	trashRel := "/" + TrashDir
+	// The trailing separator keeps "/.trash-old" from matching "/.trash".
+	if fromRel == trashRel || strings.HasPrefix(fromRel+"/", trashRel+"/") {
+		return "", ErrInTrash
+	}
+
+	// The trash folder is created on demand, and an error other than
+	// "already exists" (e.g. a file named .trash) must fail the trashing.
+	trashFull := filepath.Join(f.root, TrashDir)
+	if err := os.Mkdir(trashFull, 0o755); err != nil && !os.IsExist(err) {
+		return "", err
+	}
+
+	name := filepath.Base(fromFull)
+	if _, err := os.Lstat(filepath.Join(trashFull, name)); err == nil {
+		name = uniqueTrashedName(trashFull, name)
+	}
+	toFull := filepath.Join(trashFull, name)
+	if err := os.Rename(fromFull, toFull); err != nil {
+		return "", err
+	}
+	return f.relOf(toFull), nil
+}
+
+// uniqueTrashedName returns a name not yet present in dir, derived from name by
+// inserting " 2", " 3", … before the extension ("a.txt" → "a 2.txt", a dotfile
+// or a folder → ".env 2", "docs 2").
+func uniqueTrashedName(dir, name string) string {
+	base, ext := name, ""
+	if i := strings.LastIndexByte(name, '.'); i > 0 && i < len(name)-1 {
+		base, ext = name[:i], name[i:]
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s %d%s", base, n, ext)
+		if _, err := os.Lstat(filepath.Join(dir, candidate)); err != nil {
+			return candidate
+		}
+	}
 }

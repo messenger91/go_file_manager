@@ -261,6 +261,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | POST   | `/api/rename`   | Rename a file or folder in place     |
 | POST   | `/api/move`     | Move a file or folder to another path|
 | POST   | `/api/copy`     | Copy a file or folder to another path|
+| POST   | `/api/trash`    | Move a file or folder into `/.trash` |
 | POST   | `/api/create`   | Create an empty file                 |
 | PUT    | `/api/write`    | Overwrite a file (body is new content)|
 | POST   | `/api/upload`   | Upload one or more files (multipart) |
@@ -286,6 +287,15 @@ folder into itself or its own subtree returns `400`.
 folders, the whole subtree. Symlinks are copied as links and never followed; a
 failed copy removes the partial destination. The same `404`/`409`/`400` rules
 apply.
+
+`POST /api/trash?path=/sub/old.txt` moves an entry into the trash folder
+(`/.trash` at the root), creating that folder on first use; the response's
+`path` field is the trashed entry's new location. Because `/.trash` is a dot
+entry, listings hide it unless `&hidden=1` is passed — enable "Show hidden
+files" in the UI to browse it and restore entries with a normal move. Trashing
+the same name twice never overwrites: the second entry lands as `old 2.txt`. The
+root, the trash folder itself and entries already inside it are refused with
+`400`.
 
 `POST /api/create?path=/sub/note.txt` creates an empty file (`409` if it exists).
 `PUT /api/write?path=/sub/note.txt` replaces a file's contents with the raw

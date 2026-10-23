@@ -415,3 +415,49 @@ func TestCopyEndpoint(t *testing.T) {
 		t.Fatalf("copy root status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestTrashEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("a"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	trash := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/trash?path="+url.QueryEscape(path), nil)
+		req.SetBasicAuth("admin", "secret")
+		return s.do(t, req)
+	}
+
+	rec := trash("/a.txt")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("trash status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Trashed string `json:"trashed"`
+		Path    string `json:"path"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode trash response: %v", err)
+	}
+	if body.Trashed != "/a.txt" || body.Path != "/.trash/a.txt" {
+		t.Fatalf("trash response = %+v, want trashed /a.txt at /.trash/a.txt", body)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, ".trash", "a.txt")); err != nil || string(data) != "a" {
+		t.Fatalf("trashed file = %q, %v", data, err)
+	}
+
+	if rec := trash("/missing.txt"); rec.Code != http.StatusNotFound {
+		t.Fatalf("trash missing status = %d, want 404: %s", rec.Code, rec.Body.String())
+	}
+	if rec := trash("/"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("trash root status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if rec := trash("/.trash"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("trash trash folder status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if rec := trash("/.trash/a.txt"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("trash entry inside trash status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}

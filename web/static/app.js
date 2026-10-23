@@ -1249,6 +1249,10 @@
     );
   }
 
+  function apiTrash(path) {
+    return sendJSON("POST", "/api/trash?path=" + encodeURIComponent(path));
+  }
+
   function apiCreate(path) {
     return sendJSON("POST", "/api/create?path=" + encodeURIComponent(path));
   }
@@ -2757,6 +2761,21 @@
     }
   }
 
+  // Trashing is a reversible move into /.trash, so it needs no confirmation.
+  // The server picks a unique name there and returns it, and the browser-local
+  // metadata follows the subtree like any other move.
+  async function trashEntry(entry) {
+    try {
+      const data = await apiTrash(entry.path);
+      rekeyFolderPaths(entry.path, data.path);
+      closeViewer();
+      await refreshCurrentView();
+      setStatus('Moved "' + entry.name + '" to trash.', false);
+    } catch (err) {
+      setStatus("Failed to move " + entry.name + " to trash: " + err.message, true);
+    }
+  }
+
   function downloadEntry(entry) {
     const a = document.createElement("a");
     a.href = "/api/download?path=" + encodeURIComponent(entry.path);
@@ -2778,6 +2797,7 @@
     up: '<path d="M12 19V5"/><path d="M5 12l7-7 7 7"/>',
     download: '<path d="M12 4v11"/><path d="M7 10.5l5 5 5-5"/><path d="M5 20h14"/>',
     delete: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/>',
+    trash: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M12 10.5v4.5"/><path d="M9.9 12.9l2.1 2.1 2.1-2.1"/>',
     newFolder: '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>',
     newFile: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6M9 15h6"/>',
     upload: '<path d="M12 20V9"/><path d="M7 13.5l5-5 5 5"/><path d="M5 4h14"/>',
@@ -3133,6 +3153,7 @@
           hideItem,
           noteItem,
           { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
+          { label: "Move to trash", icon: "trash", action: function () { trashEntry(entry); } },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ]
       : [
@@ -3152,6 +3173,7 @@
           hideItem,
           noteItem,
           { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
+          { label: "Move to trash", icon: "trash", action: function () { trashEntry(entry); } },
           { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
         ];
     items.push({ separator: true });

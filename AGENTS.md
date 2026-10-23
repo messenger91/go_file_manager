@@ -43,8 +43,8 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - `internal/config` — env/`.env` loading. Precedence: **process env > `.env` > defaults**.
   `.env` is read from the current working directory.
 - `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`,
-  `Delete`, `Mkdir`, `Rename`, `Move`, `Copy`, `Create`, `Write`, `Upload`, `Disk`). This is the security
-  boundary; test changes here.
+  `Delete`, `Mkdir`, `Rename`, `Move`, `Copy`, `Trash`, `Create`, `Write`, `Upload`, `Disk`).
+  This is the security boundary; test changes here.
 - `internal/server` — HTTP routes, authentication (login form + sessions), JSON/error
   handling.
 - `internal/host` — host info for `GET /api/info` (hostname, OS name, arch, uptime, load
@@ -75,7 +75,7 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - `/api/read` refuses files over `files.MaxReadSize` (2 MiB) so callers download instead.
   `/api/list` omits entries whose name starts with a dot unless `hidden=1` is passed; the
   UI sends it only when the settings toggle is on (default: hidden).
-- Every mutation (delete, mkdir, rename, move, copy, create, write, upload) uses `resolveTarget`
+- Every mutation (delete, mkdir, rename, move, copy, trash, create, write, upload) uses `resolveTarget`
   (not `resolve`): it resolves the parent but never the final element, so operating on a
   symlink affects the link and leaves its target intact, even when the target is outside
   the root. `Write` additionally refuses a symlink target outright (`ErrForbidden`, 403).
@@ -109,6 +109,22 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   permission bits (directories get owner access while filling, then are chmod'ed back),
   recreates symlinks with `os.Readlink`+`os.Symlink`, refuses special files
   (`ErrUnsupported`), and removes a partial destination if anything fails.
+- Trash is a reversible delete: `POST /api/trash?path=/a/b` calls `files.Trash`, which
+  moves the entry into `/.trash` (`files.TrashDir`) at the root, **creating that folder on
+  first use** (`os.Mkdir`, `ErrExist` tolerated). It returns `{"trashed": src, "path": dst}`
+  because the destination name may not be the source name: a collision inside `.trash`
+  gets " 2", " 3"… inserted before the extension by `uniqueTrashedName()` ("a.txt" →
+  "a 2.txt"; dotfiles/folders → ".env 2", "docs 2"), so trashing never overwrites. The
+  source goes through `resolveTarget` (a symlink is trashed as a link), the root is
+  rejected, and the trash folder itself or an entry already inside it returns
+  `ErrInTrash` (400, same trailing-slash comparison as move-into-self so `/.trash-old` is
+  fine). `/.trash` starts with a dot, so listings hide it unless "Show hidden files" is
+  on; restoring is a normal Move out of it. In the UI the context menu's "Move to trash"
+  (files and folders, right before Delete, `trash` icon in `MENU_ICONS`, not danger) calls
+  `trashEntry()`: no confirmation (it is reversible), `rekeyFolderPaths()` to the returned
+  path so pins/favorites/tags/notes/hidden marks/recents follow like any move, then
+  refresh + status. There is no empty-trash or restore UI (yet); delete inside `.trash` is
+  the permanent one.
 - Navigation is in-page only: `navigate()` never calls `history.pushState`, so the browser
   Back button leaves the app. The in-app `#nav-back` arrow uses its own `navHistory` stack
   (capped at 50): it returns to the previous folder, falls back to the parent when the
@@ -218,7 +234,7 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `clearNotes()` (Settings → Clear notes, confirmed) wipes all of them. The notes menu's
   empty state is two disabled hints.
 - Properties: the context menu's "Properties" item (files and folders, right before
-  Delete) calls `showProperties(entry)`. It opens `#properties-modal` immediately with the
+  Move to trash and Delete) calls `showProperties(entry)`. It opens `#properties-modal` immediately with the
   listing's data, then re-fetches `GET /api/metadata` to refresh it, so a folder listed
   long ago still shows the current size/mtime; a request counter (`propertiesRequest`)
   plus a `hidden` check keep a slow response from overwriting a newer dialog. The refresh
