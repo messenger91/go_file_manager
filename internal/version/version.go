@@ -8,4 +8,4 @@ package version
 // a minor bump, a bug fix a patch bump, and a breaking change a major bump.
 // `internal/server` reports it from GET /api/info and `main` logs it at
 // startup, so there is exactly one place to edit.
-const Version = "1.8.0"
+const Version = "1.9.0"

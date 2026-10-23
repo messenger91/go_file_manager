@@ -31,8 +31,8 @@ previewing, editing, uploading, and deleting files under a single root folder.
   Edit note); noted entries carry a badge, and the 📝 header button lists every note with a
   preview line, opening the full text when clicked
 - Settings: the ⚙ button in the header toggles hidden (dot) folders and files, switches
-  between list and grid view, opens Server info, and clears tags, favorites, recent items,
-  hidden marks or notes in one confirmed step
+  between light and dark theme and list/grid view, opens Server info, and clears tags,
+  favorites, recent items, hidden marks or notes in one confirmed step
 - Move: any file or folder can be moved to another folder from its context menu; a folder
   picker starts in the current folder, files are never offered as destinations, and
   shortcuts, tags, notes and hidden marks follow the moved subtree
@@ -42,11 +42,11 @@ previewing, editing, uploading, and deleting files under a single root folder.
 - Hide entries: any file or folder can be hidden from its context menu (Hide / Unhide);
   hidden rows disappear from listings and shortcuts, and "Show hidden files" reveals them
   dimmed with a badge so they can be unhidden
-- Folder colours: pick one of eight swatches from a folder's context menu and its icon is
-  drawn in that colour (remembered per browser)
-- Folder tags: the 🏷 button in the header groups every coloured folder by colour (one
-  colour = one tag, with the folder count per tag), so tagged folders are one click away
-  from anywhere; click a folder in the list to open it
+- Tags: pick one of eight colours from any file's or folder's context menu — a folder's
+  icon is drawn in that colour and a tagged file gets a coloured dot (remembered per browser)
+- Tag folders: the 🏷 button in the header groups every tagged entry by colour (one colour =
+  one tag, with the entry count per tag); click a tag heading to open it as a virtual folder
+  listing every file and folder carrying that colour, or click an entry to jump straight to it
 - Configurable list columns: show/hide and drag (or use ▲/▼) to reorder, remembered per browser
 - Filter the current folder and sort by name, size, or modified date
 - Responsive, mobile-first list (compact rows; the Modified column starts hidden on narrow screens)
@@ -61,7 +61,7 @@ previewing, editing, uploading, and deleting files under a single root folder.
   still works for scripts and API clients
 - Server info popup from the header (disk/RAM usage meters + app version, hostname, OS,
   uptime, load average, CPU, Go version)
-- Light and dark theme (remembered per browser)
+- Light and dark theme, switched from Settings and remembered per browser
 - Access confined to `HOME_DIR`; traversal is clamped into the root and symlink escapes are rejected
 
 ## Quick start

@@ -131,17 +131,36 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   (`[{path, name}]`, in pin order), `folderColors` (`{path: colorKey}`) and `gridSize`
   (`s|m|l`). `pinnedFolders`/`folderColors`/`gridSize` are written with `saveStored()`
   (JSON) and read with `loadStored()`; `gridSize` is a plain string. `folderColor()`
-  validates against `FOLDER_COLORS`, so a tampered entry cannot inject CSS. The 🏷 header
-  button (`#tags-toggle`, `showTagsMenu()`) turns colours into tags: one group per palette
-  colour, in `FOLDER_COLORS` order, listing each coloured folder (name from `pathName()`,
-  sorted case-insensitively, path as the tooltip) so a click navigates there. Groups are
-  rendered by `buildMenu()` from `{group, color, count}` items as non-interactive
-  `.context-group` headings (a dot, the colour name and a `.context-count`), so keyboard
-  navigation targets `button.color-dot` only. `updateTagsButton()` keeps the header count
-  in step and is called by `setFolderColor()`, `forgetFolderPaths()` and on boot; the
-  rekey/forget helpers already keep `folderColors` in step with renames and deletes.
+  validates against `FOLDER_COLORS`, so a tampered entry cannot inject CSS. Despite the
+  key's name, `folderColors` tags **files too**: a folder shows its colour in the icon, a
+  file gets a `.tag-dot` badge in the list and a dot in the card's badge corner.
+- Tags are virtual folders. The 🏷 header button (`#tags-toggle`, `showTagsMenu()`) groups
+  every tagged entry by palette colour, in `FOLDER_COLORS` order, case-insensitively by
+  name (path as the tooltip, count per group). `buildMenu()` renders `{group, color,
+  count, action, title}` items: with an `action` the heading becomes a real
+  `button.context-group.context-group-action` (role `menuitem`, focusable, and the first
+  focus target on open) that calls `showTagView(color)`; without one it stays a
+  non-interactive `.context-group` div. Clicking a listed entry calls `openTaggedEntry()`,
+  which asks `/api/metadata` first because the menu stores no type, then navigates for a
+  folder or previews a file. `updateTagsButton()` keeps the header count ("Tags (n)" /
+  "Tags (empty)") in step and runs from `setFolderColor()`, `forgetFolderPaths()` and on
+  boot; the rekey/forget helpers keep `folderColors` in step with renames and deletes.
   Only palette-valid colours are listed, so tampered storage entries are ignored, and the
   empty state is two `disabled` hints.
+- `showTagView(color)` makes a tag a virtual folder: it sets `tagView`, pushes the current
+  folder onto `navHistory` (unless `recordHistory: false`), renders `Home › ● Red` via
+  `renderTagBreadcrumbs()`, disables `#upload-toggle` through `setTagViewUpload(true)`,
+  fetches `/api/metadata` for every tagged path and silently drops paths that 404 from
+  `folderColors` (saving and updating the header); any other failure keeps the tag and
+  only leaves that entry out, with a status line explaining it. Entries go through the normal
+  `renderEntries()`, so sorting, filtering, columns, grid size and the entry context menu
+  all work; `pinnedEntries()` returns nothing and `excludePinned()` passes entries through
+  (a tag view has no Pinned section), and `globalMenuItems()` omits New folder / New file /
+  Upload there. `tagViewSeq` drops a slow metadata batch when a newer view opened.
+  `navigate()` clears `tagView` (and re-enables upload), while `refreshCurrentView()`
+  re-runs `showTagView(tagView, {recordHistory: false})` after rename/delete/move/copy so
+  mutations stay in the view; `setFolderColor()` does the same, `clearTags()` returns to
+  the last folder, and `emptyText()` says "Nothing is tagged red yet."
 - Favorites are a fourth key, `favorites` (`[{path, name, isDir}]`, in add order). The ★ in
   the header (`#favorites-toggle`, filled and gold via `.has-items`) opens the same menu
   component anchored under the button (`showFavoritesMenu()`); its items carry a
@@ -160,11 +179,13 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   item. Recent entries are not badged in the listing. Rename/delete rekey and prune them
   like favorites.
 - Settings: the ⚙ header button (`#settings-toggle`, `showSettingsMenu()`) opens
-  `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, a
-  "Server info" entry (so ℹ️ can be hidden on tiny screens), then Clear tags / Clear
-  favorites / Clear recent / Clear hidden / Clear notes with counts (disabled at 0). The
-  settings menu also carries `viewMenuItems()` (List/Grid) because the ▦ header button is
-  hidden below 520px. Dot entries are hidden by default:
+  `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, the
+  `themeMenuItems()` pair ("Light theme" / "Dark theme", the only theme switch), then
+  `viewMenuItems()` (List/Grid), a "Server info" entry (so ℹ️ can be hidden on tiny
+  screens), and Clear tags / Clear favorites / Clear recent / Clear hidden / Clear notes
+  with counts (disabled at 0). The theme persists in the `theme` localStorage key and the
+  inline script in `index.html` applies it before first paint; `applyTheme()` only sets
+  the attribute and storage now (there is no header button). Dot entries are hidden by default:
   `showHidden` lives in localStorage, `navigate()` adds `&hidden=1` to `/api/list` when it
   is on, and `files.List(rel, showHidden)` skips dot names server-side (so scripts see the
   same default). Toggling re-fetches the current folder with
@@ -242,7 +263,10 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   are `flex: none`; below 600px the wordmark is hidden and icon buttons shrink to 36px
   targets, below 420px the brand (logo) is dropped, and below 520px `.topbar` wraps so the
   nav (back arrow + breadcrumbs) gets its own row while the icon controls share the first.
-  Below 400px the ℹ️ button is hidden (Server info lives in the ⚙ settings menu, always)
+  Nine controls remain (tags, notes, recent, favorites, upload, info, view, settings,
+  logout) after the theme switch moved into Settings, so they still fit one row down to
+  401px (9×36 + 8×4.8 gap + 19.2 padding ≈ 382px). Below 400px the ℹ️ button is hidden
+  (Server info lives in the ⚙ settings menu, always)
   and the remaining eight shave to 34px, so everything still fits across 320px
   (8×34 + 7×3.2 gap + 19.2 padding ≈ 314px). Re-check 320–400px layouts when adding
   another header control.

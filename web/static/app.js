@@ -6,7 +6,6 @@
     navBack: document.getElementById("nav-back"),
     body: document.getElementById("listing-body"),
     status: document.getElementById("status"),
-    themeToggle: document.getElementById("theme-toggle"),
     viewer: document.getElementById("viewer"),
     viewerName: document.getElementById("viewer-name"),
     viewerBody: document.getElementById("viewer-body"),
@@ -183,18 +182,35 @@
       .concat([ACTIONS_COLUMN]);
   }
 
-  // --- theme ---
+  // --- theme (switched from the settings menu) ---
   function applyTheme(theme) {
     document.documentElement.dataset.theme = theme;
-    els.themeToggle.textContent = theme === "dark" ? "☀️" : "🌙";
     localStorage.setItem("theme", theme);
   }
 
   applyTheme(document.documentElement.dataset.theme || "dark");
 
-  els.themeToggle.addEventListener("click", function () {
-    applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark");
-  });
+  function themeMenuItems() {
+    const dark = document.documentElement.dataset.theme === "dark";
+    return [
+      {
+        label: "Light theme",
+        icon: "sun",
+        checked: !dark,
+        action: function () {
+          applyTheme("light");
+        },
+      },
+      {
+        label: "Dark theme",
+        icon: "theme",
+        checked: dark,
+        action: function () {
+          applyTheme("dark");
+        },
+      },
+    ];
+  }
 
   // --- view mode ---
   function applyView(mode) {
@@ -276,6 +292,10 @@
 
   let folderColors = loadStored("folderColors", {});
   if (!folderColors || typeof folderColors !== "object") folderColors = {};
+
+  // The colour of the tag currently shown as a virtual folder, or null.
+  let tagView = null;
+  let tagViewSeq = 0;
 
   // Dot entries are hidden by default; the settings menu toggles them.
   let showHidden = loadStored("showHidden", false) === true;
@@ -469,12 +489,12 @@
   }
 
   async function clearTags() {
-    const count = taggedFolders().length;
+    const count = taggedPaths().length;
     if (count === 0) return;
     const ok = await confirmDialog({
       title: "Clear tags",
       message:
-        "Remove the colour from " + count + " tagged " + (count === 1 ? "folder" : "folders") +
+        "Remove the colour from " + count + " tagged " + (count === 1 ? "entry" : "entries") +
         "? This cannot be undone.",
       confirmLabel: "Clear tags",
     });
@@ -482,8 +502,13 @@
     folderColors = {};
     saveStored("folderColors", folderColors);
     updateTagsButton();
-    renderList();
-    setStatus("Cleared " + count + " folder " + (count === 1 ? "tag." : "tags."), false);
+    if (tagView !== null) {
+      // The tag being shown no longer exists; go back to the last folder.
+      await navigate(currentPath, { recordHistory: false });
+    } else {
+      renderList();
+    }
+    setStatus("Cleared " + count + " " + (count === 1 ? "tag." : "tags."), false);
   }
 
   function noteFor(path) {
@@ -547,67 +572,83 @@
     return FOLDER_COLORS.indexOf(color) !== -1 ? color : "";
   }
 
+  function colorLabel(color) {
+    return color.charAt(0).toUpperCase() + color.slice(1);
+  }
+
   function setFolderColor(entry, color) {
     const next = FOLDER_COLORS.indexOf(color) !== -1 ? color : "";
     if (next) folderColors[entry.path] = next;
     else delete folderColors[entry.path];
     saveStored("folderColors", folderColors);
-    renderList();
     updateTagsButton();
+    if (tagView !== null) {
+      // Adding or clearing a tag changes the virtual folder being shown.
+      showTagView(tagView, { recordHistory: false });
+    } else {
+      renderList();
+    }
   }
 
-  // Colored folders are the tags: the header groups them by palette colour, so
-  // one colour is one tag.
-  function taggedFolders() {
+  // One palette colour is one tag, and a tag is a virtual folder: tagged
+  // files and folders are grouped in the header menu and listed together.
+  function taggedPaths() {
     return Object.keys(folderColors).filter(function (path) {
-      return FOLDER_COLORS.indexOf(folderColors[path]) !== -1;
+      return folderColor(path) !== "";
+    });
+  }
+
+  function tagPaths(color) {
+    return taggedPaths().filter(function (path) {
+      return folderColor(path) === color;
     });
   }
 
   function updateTagsButton() {
-    const count = taggedFolders().length;
+    const count = taggedPaths().length;
     els.tagsToggle.classList.toggle("has-items", count > 0);
-    const label = count ? "Folder tags (" + count + ")" : "Folder tags (empty)";
+    const label = count ? "Tags (" + count + ")" : "Tags (empty)";
     els.tagsToggle.setAttribute("aria-label", label);
     els.tagsToggle.title = label;
   }
 
   function tagMenuItems() {
-    const tagged = taggedFolders();
+    const tagged = taggedPaths();
     if (tagged.length === 0) {
       return [
-        { label: "No colored folders yet", icon: "tag", disabled: true },
+        { label: "No tags yet", icon: "tag", disabled: true },
         { separator: true },
-        { label: "Pick a colour from a folder's context menu", icon: "info", disabled: true },
+        { label: "Pick a colour from an entry's context menu", icon: "info", disabled: true },
       ];
     }
 
     const items = [];
     FOLDER_COLORS.forEach(function (color) {
-      const folders = tagged
-        .filter(function (path) {
-          return folderColors[path] === color;
-        })
+      const paths = tagPaths(color)
         .map(function (path) {
           return { path: path, name: pathName(path) };
         })
         .sort(function (a, b) {
           return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
         });
-      if (folders.length === 0) return;
+      if (paths.length === 0) return;
 
       items.push({
-        group: color.charAt(0).toUpperCase() + color.slice(1),
+        group: colorLabel(color),
         color: color,
-        count: folders.length,
+        count: paths.length,
+        title: "Open the " + colorLabel(color) + " tag",
+        action: function () {
+          showTagView(color);
+        },
       });
-      folders.forEach(function (folder) {
+      paths.forEach(function (item) {
         items.push({
-          label: folder.name,
-          title: folder.path,
+          label: item.name,
+          title: item.path,
           icon: "open",
           action: function () {
-            navigate(folder.path);
+            openTaggedEntry(item.path);
           },
         });
       });
@@ -615,13 +656,144 @@
     return items;
   }
 
+  // The menu does not know whether a tagged path is a file or a folder, so ask
+  // the server before opening it (a folder navigates, a file previews).
+  function openTaggedEntry(path) {
+    api("/api/metadata", path)
+      .then(function (entry) {
+        if (entry.isDir) navigate(entry.path);
+        else openFile(entry);
+      })
+      .catch(function (err) {
+        setStatus("Cannot open " + path + ": " + err.message, true);
+      });
+  }
+
   function showTagsMenu() {
     const rect = els.tagsToggle.getBoundingClientRect();
-    const count = taggedFolders().length;
-    const title = count ? "Folder tags (" + count + ")" : "Folder tags";
+    const count = taggedPaths().length;
+    const title = count ? "Tags (" + count + ")" : "Tags";
     buildMenu(rect.right, rect.bottom + 6, tagMenuItems(), title);
     els.contextMenu.dataset.source = "tags";
     els.tagsToggle.setAttribute("aria-expanded", "true");
+  }
+
+  // --- tag view: a tag shown as a virtual folder ---
+  function setTagViewUpload(inTagView) {
+    els.uploadToggle.disabled = inTagView;
+    const label = inTagView
+      ? "Uploads are not available in a tag view"
+      : "Upload files to this folder";
+    els.uploadToggle.title = label;
+    els.uploadToggle.setAttribute("aria-label", label);
+  }
+
+  function renderTagBreadcrumbs(color) {
+    els.breadcrumbs.textContent = "";
+
+    const home = document.createElement("a");
+    home.className = "crumb";
+    home.href = "#";
+    home.textContent = "Home";
+    home.title = "Home";
+    home.addEventListener("click", function (e) {
+      e.preventDefault();
+      navigate("/");
+    });
+    els.breadcrumbs.appendChild(home);
+
+    const sep = document.createElement("span");
+    sep.className = "sep";
+    sep.setAttribute("aria-hidden", "true");
+    sep.textContent = "›";
+    els.breadcrumbs.appendChild(sep);
+
+    const tag = document.createElement("span");
+    tag.className = "crumb current";
+    tag.setAttribute("aria-current", "page");
+    tag.title = colorLabel(color) + " tag";
+    const dot = document.createElement("span");
+    dot.className = "tag-dot crumb-tag-dot";
+    dot.style.background = "var(--folder-" + color + ")";
+    tag.appendChild(dot);
+    tag.appendChild(document.createTextNode(colorLabel(color)));
+    els.breadcrumbs.appendChild(tag);
+
+    setTimeout(function () {
+      els.breadcrumbs.scrollLeft = els.breadcrumbs.scrollWidth;
+      updateBreadcrumbFade();
+    }, 0);
+  }
+
+  // Lists every entry carrying one colour, fetched fresh so sizes and types
+  // are current. Tags whose path no longer exists are dropped silently.
+  async function showTagView(color, options) {
+    const record = !options || options.recordHistory !== false;
+    if (record) {
+      navHistory.push(currentPath);
+      if (navHistory.length > 50) navHistory.shift();
+    }
+    tagView = color;
+    const seq = ++tagViewSeq;
+    setStatus("");
+    closeViewer();
+    filterText = "";
+    els.filter.value = "";
+    els.filter.placeholder = "Filter this tag…";
+    els.filter.setAttribute("aria-label", "Filter entries in this tag");
+    renderTagBreadcrumbs(color);
+    setTagViewUpload(true);
+
+    const paths = tagPaths(color);
+    let entries = [];
+    if (paths.length > 0) {
+      const results = await Promise.all(
+        paths.map(function (path) {
+          return api("/api/metadata", path).catch(function (err) {
+            return { path: path, error: err };
+          });
+        })
+      );
+      if (seq !== tagViewSeq || tagView !== color) return;
+      const alive = [];
+      let pruned = false;
+      let failed = 0;
+      results.forEach(function (result) {
+        if (result && !result.error) {
+          alive.push(result);
+          return;
+        }
+        // A 404 means the entry is really gone, so the stale tag goes with it.
+        // Any other failure is temporary: keep the tag, just leave it out.
+        if (result && result.error.status === 404) {
+          delete folderColors[result.path];
+          pruned = true;
+        } else {
+          failed++;
+        }
+      });
+      if (pruned) {
+        saveStored("folderColors", folderColors);
+        updateTagsButton();
+      }
+      entries = alive;
+      if (failed > 0) {
+        setStatus(
+          failed + " tagged " + (failed === 1 ? "entry" : "entries") + " could not be loaded.",
+          true
+        );
+      }
+    }
+    if (seq !== tagViewSeq || tagView !== color) return;
+    renderEntries(entries);
+    updateBackButton();
+  }
+
+  // Mutations in a tag view should stay there instead of jumping back to the
+  // folder the tag view was opened from.
+  function refreshCurrentView() {
+    if (tagView !== null) return showTagView(tagView, { recordHistory: false });
+    return navigate(currentPath);
   }
 
   // --- settings: hidden entries + wiping this browser's shortcuts ---
@@ -634,7 +806,7 @@
   }
 
   function settingsMenuItems() {
-    const tags = taggedFolders().length;
+    const tags = taggedPaths().length;
     function clearLabel(name, count) {
       return count ? name + " (" + count + ")" : name;
     }
@@ -646,10 +818,8 @@
         checked: showHidden,
         action: toggleHidden,
       },
-      { separator: true },
     ];
-    // The ▦ header button is hidden on narrow screens, so view switching
-    // lives here too.
+    items.push.apply(items, themeMenuItems());
     items.push.apply(items, viewMenuItems());
     items.push({ separator: true });
     items.push({ label: "Server info", icon: "info", action: function () { openInfo(); } });
@@ -1023,7 +1193,9 @@
       } catch (_) {
         /* not JSON */
       }
-      throw new Error(message);
+      const error = new Error(message);
+      error.status = res.status;
+      throw error;
     }
     return res.json();
   }
@@ -1039,7 +1211,9 @@
       } catch (_) {
         /* not JSON */
       }
-      throw new Error(message);
+      const error = new Error(message);
+      error.status = res.status;
+      throw error;
     }
     return res.json();
   }
@@ -1477,12 +1651,15 @@
   }
 
   function emptyText() {
-    return currentEntries.length === 0 ? "This folder is empty." : "No files match your filter.";
+    if (currentEntries.length > 0) return "No files match your filter.";
+    if (tagView !== null) return "Nothing is tagged " + colorLabel(tagView).toLowerCase() + " yet.";
+    return "This folder is empty.";
   }
 
   // Pinned folders are shortcuts: they lead the listing and are not repeated in
   // the normal entries of the current folder.
   function pinnedEntries() {
+    if (tagView !== null) return [];
     const query = filterText.trim().toLowerCase();
     return pinnedFolders
       .filter(function (item) {
@@ -1500,7 +1677,8 @@
   }
 
   function excludePinned(entries) {
-    if (pinnedFolders.length === 0) return entries;
+    // A tag view has no pinned section, so nothing is taken out of it.
+    if (pinnedFolders.length === 0 || tagView !== null) return entries;
     const pinned = {};
     pinnedFolders.forEach(function (item) {
       pinned[item.path] = true;
@@ -1607,10 +1785,23 @@
     }
   }
 
+  // A folder shows its tag in the coloured icon; a tagged file gets a dot.
+  function appendTagBadge(wrap, entry) {
+    if (entry.isDir) return;
+    const color = folderColor(entry.path);
+    if (!color) return;
+    const dot = document.createElement("span");
+    dot.className = "tag-dot tag-badge";
+    dot.style.background = "var(--folder-" + color + ")";
+    dot.title = colorLabel(color) + " tag";
+    wrap.appendChild(dot);
+  }
+
   function appendEntryBadges(wrap, entry, pinned) {
     if (pinned) wrap.appendChild(menuIcon("pin", "pin-badge"));
     if (isFavorite(entry.path)) wrap.appendChild(menuIcon("star", "favorite-badge"));
     if (noteFor(entry.path)) wrap.appendChild(menuIcon("note", "note-badge"));
+    appendTagBadge(wrap, entry);
     if (isHidden(entry.path)) wrap.appendChild(menuIcon("eyeOff", "hidden-badge"));
   }
 
@@ -1857,6 +2048,7 @@
     if (pinned) badges.appendChild(menuIcon("pin", "pin-badge"));
     if (isFavorite(entry.path)) badges.appendChild(menuIcon("star", "favorite-badge"));
     if (noteFor(entry.path)) badges.appendChild(menuIcon("note", "note-badge"));
+    appendTagBadge(badges, entry);
     if (isHidden(entry.path)) badges.appendChild(menuIcon("eyeOff", "hidden-badge"));
 
     const actions = document.createElement("div");
@@ -1943,6 +2135,13 @@
 
   async function navigate(path, options) {
     const record = !options || options.recordHistory !== false;
+    if (tagView !== null) {
+      tagView = null;
+      tagViewSeq++;
+      setTagViewUpload(false);
+      els.filter.placeholder = "Filter this folder…";
+      els.filter.setAttribute("aria-label", "Filter files in this folder");
+    }
     setStatus("");
     closeViewer();
     try {
@@ -2158,7 +2357,7 @@
       const parent = entry.path.slice(0, entry.path.lastIndexOf("/"));
       rekeyFolderPaths(entry.path, parent + "/" + name);
       closeViewer();
-      await navigate(currentPath);
+      await refreshCurrentView();
       setStatus('Renamed "' + entry.name + '" to "' + name + '".', false);
     } catch (err) {
       setStatus("Failed to rename: " + err.message, true);
@@ -2336,7 +2535,7 @@
       closePicker();
       if (mode === "move") rekeyFolderPaths(entry.path, destination);
       closeViewer();
-      await navigate(currentPath);
+      await refreshCurrentView();
       if (mode === "move") {
         setStatus('Moved "' + entry.name + '" to ' + dir + ".", false);
       } else if (name !== entry.name) {
@@ -2551,7 +2750,7 @@
       await apiDelete(entry.path, entry.isDir);
       forgetFolderPaths(entry.path);
       closeViewer();
-      await navigate(currentPath);
+      await refreshCurrentView();
       setStatus("Deleted " + kind + ' "' + entry.name + '".', false);
     } catch (err) {
       setStatus("Failed to delete " + entry.name + ": " + err.message, true);
@@ -2588,6 +2787,8 @@
     properties: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
     tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
     eye: '<path d="M2.5 12s3.6-6.5 9.5-6.5S21.5 12 21.5 12s-3.6 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>',
+    theme: '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 1 0 10.5 10.5z"/>',
+    sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/>',
     note: '<path d="M20 4.5A1.5 1.5 0 0 0 18.5 3h-13A1.5 1.5 0 0 0 4 4.5v9A1.5 1.5 0 0 0 5.5 15H9l3.5 4.5V15h6A1.5 1.5 0 0 0 20 13.5z"/><path d="M8 8h8M8 11h5"/>',
     eyeOff: '<path d="M3 3l18 18"/><path d="M10.6 6.1A9.9 9.9 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.8 3.7"/><path d="M6.4 6.9C3.9 8.7 2.5 12 2.5 12s3.5 6.5 9.5 6.5c1.7 0 3.2-.5 4.5-1.2"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/>',
     check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -2632,7 +2833,7 @@
     const row = document.createElement("div");
     row.className = "color-row";
     row.setAttribute("role", "group");
-    row.setAttribute("aria-label", "Folder color");
+    row.setAttribute("aria-label", "Tag color");
 
     function addDot(color, className) {
       const dot = document.createElement("button");
@@ -2728,12 +2929,18 @@
   }
 
   function globalMenuItems() {
-    return [
-      { label: "New folder", icon: "newFolder", action: function () { createFolder(); } },
-      { label: "New file", icon: "newFile", action: function () { createFile(); } },
-      { label: "Upload files…", icon: "upload", action: function () { els.fileInput.click(); } },
-      { separator: true },
-    ]
+    // A tag view is a virtual folder, so creating and uploading make no sense
+    // there; the entries themselves can still be acted on.
+    const items =
+      tagView !== null
+        ? []
+        : [
+            { label: "New folder", icon: "newFolder", action: function () { createFolder(); } },
+            { label: "New file", icon: "newFile", action: function () { createFile(); } },
+            { label: "Upload files…", icon: "upload", action: function () { els.fileInput.click(); } },
+            { separator: true },
+          ];
+    return items
       .concat(viewMenuItems())
       .concat([
         { separator: true },
@@ -2761,9 +2968,20 @@
         return;
       }
       if (item.group) {
-        const heading = document.createElement("div");
-        heading.className = "context-group";
-        heading.setAttribute("role", "presentation");
+        const clickable = typeof item.action === "function";
+        const heading = document.createElement(clickable ? "button" : "div");
+        heading.className = "context-group" + (clickable ? " context-group-action" : "");
+        if (clickable) {
+          heading.type = "button";
+          heading.setAttribute("role", "menuitem");
+          if (item.title) heading.title = item.title;
+          heading.addEventListener("click", function () {
+            hideContextMenu();
+            item.action();
+          });
+        } else {
+          heading.setAttribute("role", "presentation");
+        }
         if (item.color) {
           const dot = document.createElement("span");
           dot.className = "color-dot";
@@ -2860,7 +3078,9 @@
     els.contextMenu.style.left = left + "px";
     els.contextMenu.style.top = top + "px";
 
-    const first = els.contextMenu.querySelector(".context-item:not(:disabled)");
+    const first = els.contextMenu.querySelector(
+      ".context-item:not(:disabled), .context-group-action:not(:disabled)"
+    );
     if (first) first.focus({ preventScroll: true });
   }
 
@@ -2923,6 +3143,12 @@
           favoriteItem,
           { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
           { separator: true },
+          {
+            swatches: true,
+            current: folderColor(entry.path),
+            onPick: function (color) { setFolderColor(entry, color); },
+          },
+          { separator: true },
           hideItem,
           noteItem,
           { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
@@ -2935,7 +3161,8 @@
   }
 
   function showViewMenu(x, y) {
-    buildMenu(x, y, globalMenuItems(), currentPath);
+    const title = tagView !== null ? colorLabel(tagView) + " tag" : currentPath;
+    buildMenu(x, y, globalMenuItems(), title);
     els.contextMenu.dataset.source = "view";
   }
 
@@ -3008,7 +3235,7 @@
   els.contextMenu.addEventListener("keydown", function (e) {
     const items = Array.prototype.slice.call(
       els.contextMenu.querySelectorAll(
-        ".context-item:not(:disabled), button.color-dot, .context-remove"
+        ".context-item:not(:disabled), .context-group-action:not(:disabled), button.color-dot, .context-remove"
       )
     );
     if (items.length === 0) return;

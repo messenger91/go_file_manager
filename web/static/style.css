@@ -502,6 +502,26 @@ body[data-view="list"] .size-toggle {
   color: var(--accent);
 }
 
+/* A file shows its tag as a dot; a folder colours its icon instead. */
+.tag-dot {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex: none;
+}
+
+.tag-dot.tag-badge {
+  width: 0.5rem;
+  height: 0.5rem;
+  box-shadow: 0 0 0 1px var(--bg);
+}
+
+.crumb .tag-dot {
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
 /* Second line in a menu row, e.g. the note preview. */
 .menu-text {
   display: flex;
@@ -683,6 +703,39 @@ body[data-view="list"] .size-toggle {
 
 .context-group .color-dot:hover {
   transform: none;
+}
+
+/* A tag heading opens that tag as a virtual folder. */
+.context-group-action {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  font-family: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  text-align: left;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.context-group-action:hover,
+.context-group-action:focus-visible {
+  color: var(--text);
+  background: var(--hover);
+  outline: none;
+}
+
+.context-group-action .color-dot {
+  cursor: pointer;
+}
+
+/* A chevron marks the heading as a row that opens something. */
+.context-group-action .menu-label::after {
+  content: " ›";
+  opacity: 0.6;
 }
 
 .context-count {
@@ -1592,9 +1645,9 @@ body[data-view="grid"] #columns-toggle {
   }
 }
 
-/* Narrow phones: the ten icon controls leave too little room for the path,
+/* Narrow phones: the nine icon controls leave too little room for the path,
    so the controls take one row and the breadcrumbs the next. */
-@media (max-width: 560px) {
+@media (max-width: 520px) {
   .topbar {
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -1603,14 +1656,6 @@ body[data-view="grid"] #columns-toggle {
   .nav {
     order: 2;
     flex: 1 1 100%;
-  }
-}
-
-/* Without the ▦ button the nine remaining controls fit 401px; view switching
-   stays available in the settings menu. */
-@media (max-width: 520px) {
-  #view-toggle {
-    display: none;
   }
 }
 
