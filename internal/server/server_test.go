@@ -1,6 +1,8 @@
 package server
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
 	"io"
 	"log"
@@ -577,5 +579,69 @@ func TestTrashEmptyEndpoint(t *testing.T) {
 	// A second call removes nothing but still succeeds.
 	if rec := empty(); rec.Code != http.StatusOK {
 		t.Fatalf("second empty status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDownloadZipEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	if err := os.Mkdir(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "note.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	get := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/download-zip?path="+url.QueryEscape(path), nil)
+		req.SetBasicAuth("admin", "secret")
+		return s.do(t, req)
+	}
+
+	rec := get("/docs")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/zip" {
+		t.Fatalf("Content-Type = %q, want application/zip", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); cd != `attachment; filename="docs.zip"` {
+		t.Fatalf("Content-Disposition = %q", cd)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatalf("response is not a valid zip: %v", err)
+	}
+	found := false
+	for _, file := range zr.File {
+		if file.Name == "docs/note.txt" {
+			found = true
+			rc, err := file.Open()
+			if err != nil {
+				t.Fatalf("open docs/note.txt: %v", err)
+			}
+			data, err := io.ReadAll(rc)
+			rc.Close()
+			if err != nil || string(data) != "hello" {
+				t.Fatalf("docs/note.txt = %q, %v", data, err)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("zip is missing docs/note.txt (%d entries)", len(zr.File))
+	}
+
+	// A file is not a folder, a missing path is 404, and the unauthenticated
+	// request gets the usual JSON 401.
+	if rec := get("/docs/note.txt"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("zip of a file status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if rec := get("/missing"); rec.Code != http.StatusNotFound {
+		t.Fatalf("zip of missing status = %d, want 404", rec.Code)
+	}
+	req := httptest.NewRequest("GET", "/api/download-zip?path=/docs", nil)
+	if rec := s.do(t, req); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", rec.Code)
 	}
 }

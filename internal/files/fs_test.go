@@ -1,8 +1,12 @@
 package files
 
 import (
+	"archive/zip"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1169,5 +1173,112 @@ func TestSearchEmptyQueryFails(t *testing.T) {
 		if _, _, err := f.Search("/", q, false); !errors.Is(err, ErrInvalidName) {
 			t.Fatalf("Search(%q) error = %v, want ErrInvalidName", q, err)
 		}
+	}
+}
+
+func TestZipFolder(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "target.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "a.txt"), []byte("alpha"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "sub", "b.txt"), []byte("beta"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An empty folder and a symlink must survive the round trip.
+	if err := os.Mkdir(filepath.Join(root, "docs", "empty"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "target.txt"), filepath.Join(root, "docs", "link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	f := New(root)
+
+	var buf bytes.Buffer
+	if err := f.Zip("/docs", &buf); err != nil {
+		t.Fatalf("zip: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatalf("zip output is not a valid archive: %v", err)
+	}
+
+	byName := make(map[string]*zip.File, len(zr.File))
+	for _, file := range zr.File {
+		byName[file.Name] = file
+	}
+	for _, name := range []string{"docs/", "docs/a.txt", "docs/sub/", "docs/sub/b.txt", "docs/empty/", "docs/link.txt"} {
+		if byName[name] == nil {
+			t.Errorf("archive is missing %q (has %v)", name, names(zr.File))
+		}
+	}
+	if len(zr.File) != 6 {
+		t.Errorf("archive holds %d entries, want 6: %v", len(zr.File), names(zr.File))
+	}
+	if data := readZip(t, byName["docs/a.txt"]); string(data) != "alpha" {
+		t.Errorf("docs/a.txt = %q, want alpha", data)
+	}
+	if link := byName["docs/link.txt"]; link != nil {
+		if link.Mode()&fs.ModeSymlink == 0 {
+			t.Errorf("docs/link.txt mode = %v, want symlink", link.Mode())
+		}
+		if target := string(readZip(t, link)); target != filepath.Join(outside, "target.txt") {
+			t.Errorf("docs/link.txt target = %q", target)
+		}
+	}
+}
+
+func names(files []*zip.File) []string {
+	out := make([]string, len(files))
+	for i, f := range files {
+		out[i] = f.Name
+	}
+	return out
+}
+
+func readZip(t *testing.T, file *zip.File) []byte {
+	t.Helper()
+	if file == nil {
+		t.Fatal("nil zip entry")
+	}
+	rc, err := file.Open()
+	if err != nil {
+		t.Fatalf("open %s: %v", file.Name, err)
+	}
+	defer rc.Close()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read %s: %v", file.Name, err)
+	}
+	return data
+}
+
+func TestZipRejectsFilesAndEscapes(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "plain.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	var buf bytes.Buffer
+	if err := f.Zip("/plain.txt", &buf); err == nil {
+		t.Fatal("zipping a file should fail")
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("failed zip wrote %d bytes, want 0", buf.Len())
+	}
+	if err := f.Zip("/missing", &buf); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("zip missing error = %v, want os.ErrNotExist", err)
+	}
+	// Traversal is clamped into the root, so it fails with "not exist" rather
+	// than an escape; either way it must not zip anything outside.
+	if err := f.Zip("/../etc", &buf); err == nil {
+		t.Fatal("zipping a clamped traversal path should fail")
 	}
 }

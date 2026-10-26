@@ -45,7 +45,7 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `.env` is read from the current working directory.
 - `internal/files` — root-confined filesystem access (`List`, `Search`, `Stat`, `ReadFile`,
   `Open`, `Delete`, `Mkdir`, `Rename`, `Move`, `Copy`, `Trash`, `EmptyTrash`, `Create`,
-  `Write`, `Upload`, `Disk`). This is the security boundary; test changes here.
+  `Write`, `Upload`, `Zip`, `Disk`). This is the security boundary; test changes here.
 - `internal/server` — HTTP routes, authentication (login form + sessions), JSON/error
   handling.
 - `internal/host` — host info for `GET /api/info` (hostname, OS name, arch, uptime, load
@@ -102,6 +102,25 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `<video>` by content, but `<embed>` needs the real type); the Disposition stays
   `attachment`, so scripts still get a download. `closeViewer()` empties `#viewer-media`,
   which also stops playback.
+- Folder download: `GET /api/download-zip?path=/docs` calls `files.Zip(rel, w)`, which
+  streams `archive/zip` with the folder itself as the archive root (extracting does not
+  splatter files). Symlinks are stored as links (`os.Readlink` target as the entry body,
+  `ModeSymlink`), unreadable subtrees and special files are skipped, and errors after the
+  first byte only get logged — the handler does an upfront `Stat` for the 403/404/400
+  cases ("not a folder"). The UI's `downloadEntry()` dispatches by `isDir`, and folders
+  carry a Download quick action in list, grid and context menu.
+- Drag-and-drop upload: `dragenter`/`dragover`/`dragleave`/`drop` on `main` feed
+  `e.dataTransfer.files` into the existing `uploadFiles()` flow. `dragCarriesFiles()`
+  checks the `Files` type so internal drags (column reorder) are ignored;
+  `uploadsAllowed()` mirrors the 📤 button's disabled state, so virtual views refuse
+  drops too. `dragDepth` counts enter/leave pairs for the `.drag-over` highlight, and a
+  document-level `drop` handler preventDefaults file drops outside the listing so the
+  browser never navigates to a dropped file.
+- Grid thumbnails: the Settings menu's "Show image thumbnails" toggle (`thumbnails`
+  localStorage key, default off, `toggleThumbnails()` re-renders without a refetch)
+  makes `gridCard()` render image files (same `previewKind()` lists as the viewer) as a
+  lazy `<img class="card-thumb">` from `/api/download`, square via `aspect-ratio`, with
+  an `error` fallback to the file emoji. List rows keep their emoji.
 - Move, copy and restore share one destination picker (`#destination-modal`). "Move to…"
   and "Copy to…" in the context menu call `openPicker(entry, "move"|"copy")`; it starts at
   the entry's parent, lists only folders from `/api/list` (excluding the entry itself, so
@@ -192,7 +211,8 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   buttons in `.row-actions`, and `renderGrid()` wraps card buttons in `.card-actions`.
   Both build each button from `menuIcon("download" | "delete")`, so list/grid/context-menu
   icons stay in sync; `.icon-action` sizes them and makes the SVG inherit the button colour
-  (`.btn.danger` turns the trash red). Files get Download, folders only Delete. The card
+  (`.btn.danger` turns the trash red). Files and folders both get Download (folders stream
+  as zip) and Delete. The card
   `keydown` handler ignores events whose `target` is not the card so Enter on a quick
   action does not also open the preview. Dimming (`opacity` until hover) is disabled under
   `@media (hover: none)`.
@@ -247,7 +267,8 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   item. Recent entries are not badged in the listing. Rename/delete rekey and prune them
   like favorites.
 - Settings: the ⚙ header button (`#settings-toggle`, `showSettingsMenu()`) opens
-  `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, the
+  `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, a
+  `checked` "Show image thumbnails" toggle (grid view only), the
   `themeMenuItems()` pair ("Light theme" / "Dark theme", the only theme switch), then
   `viewMenuItems()` (List/Grid), an "Open trash" entry, a "Server info" entry (so ℹ️ can
   be hidden on tiny screens), and Clear tags / Clear favorites / Clear recent / Clear

@@ -54,6 +54,7 @@ func (s *Server) Handler() http.Handler {
 	app.HandleFunc("GET /api/stat", s.handleStat)
 	app.HandleFunc("GET /api/read", s.handleRead)
 	app.HandleFunc("GET /api/download", s.handleDownload)
+	app.HandleFunc("GET /api/download-zip", s.handleDownloadZip)
 	app.HandleFunc("GET /api/info", s.handleInfo)
 	app.HandleFunc("DELETE /api/delete", s.handleDelete)
 	app.HandleFunc("POST /api/mkdir", s.handleMkdir)
@@ -231,6 +232,27 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+}
+
+func (s *Server) handleDownloadZip(w http.ResponseWriter, r *http.Request) {
+	rel := r.URL.Query().Get("path")
+	entry, err := s.fm.Stat(rel)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	if !entry.IsDir {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a folder"})
+		return
+	}
+	name := strings.ReplaceAll(entry.Name, `"`, "")
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`.zip"`)
+	// Once the archive has started, mid-walk problems can no longer change the
+	// status code; files.Zip skips what it cannot read and logs the rest here.
+	if err := s.fm.Zip(rel, w); err != nil {
+		s.logger.Printf("error: zip %s: %v", rel, err)
+	}
 }
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {

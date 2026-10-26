@@ -2,6 +2,7 @@
 package files
 
 import (
+	"archive/zip"
 	"errors"
 	"fmt"
 	"io"
@@ -662,4 +663,93 @@ func (f *FS) Search(rootRel, query string, showHidden bool) (string, []Entry, er
 		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
 	})
 	return f.relOf(full), entries, nil
+}
+
+// Zip writes the folder at rel into w as a zip archive whose root entry is the
+// folder itself, so extracting does not splatter files. Symlinks are stored as
+// links and never followed, special files (sockets, devices, FIFOs) are left
+// out, and unreadable subtrees are skipped like List skips dead entries.
+// Errors are only returned while the folder itself is still unreadable: once
+// writing has started the caller cannot report a failure in the status code,
+// so entries that vanish or refuse to open mid-walk are skipped instead.
+func (f *FS) Zip(rel string, w io.Writer) error {
+	full, err := f.resolve(rel)
+	if err != nil {
+		return err
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a directory", rel)
+	}
+	rootName := filepath.Base(full)
+
+	zipw := zip.NewWriter(w)
+	err = filepath.WalkDir(full, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if p == full {
+				return walkErr
+			}
+			return nil // skip unreadable subtrees
+		}
+		relToRoot, err := filepath.Rel(full, p)
+		if err != nil {
+			return nil
+		}
+		arcname := rootName
+		if relToRoot != "." {
+			arcname = rootName + "/" + filepath.ToSlash(relToRoot)
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil // broken symlink or an entry that just vanished
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return nil
+		}
+		header.Name = arcname
+		if info.IsDir() {
+			header.Name += "/"
+		}
+		header.Modified = info.ModTime()
+
+		switch {
+		case info.Mode()&os.ModeSymlink != 0:
+			target, err := os.Readlink(p)
+			if err != nil {
+				return nil
+			}
+			writer, err := zipw.CreateHeader(header)
+			if err != nil {
+				return err
+			}
+			_, err = io.WriteString(writer, target)
+			return err
+		case info.IsDir():
+			_, err := zipw.CreateHeader(header)
+			return err
+		case info.Mode().IsRegular():
+			file, err := os.Open(p)
+			if err != nil {
+				return nil // skip files that refuse to open
+			}
+			defer file.Close()
+			writer, err := zipw.CreateHeader(header)
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(writer, file)
+			return err
+		default:
+			return nil
+		}
+	})
+	if err != nil {
+		_ = zipw.Close()
+		return err
+	}
+	return zipw.Close()
 }

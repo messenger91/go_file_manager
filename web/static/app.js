@@ -2,6 +2,7 @@
 
 (function () {
   const els = {
+    main: document.querySelector("main"),
     breadcrumbs: document.getElementById("breadcrumbs"),
     navBack: document.getElementById("nav-back"),
     body: document.getElementById("listing-body"),
@@ -320,6 +321,10 @@
 
   // Dot entries are hidden by default; the settings menu toggles them.
   let showHidden = loadStored("showHidden", false) === true;
+
+  // Image thumbnails in grid view are off by default (they download whole
+  // images just to show tiles); the settings menu toggles them.
+  let showThumbs = loadStored("thumbnails", false) === true;
 
   // Entries hidden by hand (context menu) are listed again when showHidden is
   // on, so they can be unhidden. Dot entries are a server-side concern.
@@ -980,6 +985,17 @@
     setStatus(showHidden ? "Showing hidden folders and files." : "Hiding hidden folders and files.", false);
   }
 
+  // Thumbnails only change how grid cards render, so no refetch is needed.
+  function toggleThumbnails() {
+    showThumbs = !showThumbs;
+    saveStored("thumbnails", showThumbs);
+    renderList();
+    setStatus(
+      showThumbs ? "Showing image thumbnails in grid view." : "Hiding image thumbnails.",
+      false
+    );
+  }
+
   function settingsMenuItems() {
     const tags = taggedPaths().length;
     function clearLabel(name, count) {
@@ -992,6 +1008,13 @@
         icon: "eye",
         checked: showHidden,
         action: toggleHidden,
+      },
+      {
+        label: "Show image thumbnails",
+        title: "Image files appear as pictures in grid view",
+        icon: "image",
+        checked: showThumbs,
+        action: toggleThumbnails,
       },
     ];
     items.push.apply(items, themeMenuItems());
@@ -2013,19 +2036,17 @@
       const actions = document.createElement("span");
       actions.className = "row-actions";
 
-      if (!entry.isDir) {
-        const downloadBtn = document.createElement("button");
-        downloadBtn.type = "button";
-        downloadBtn.className = "btn row-download icon-action";
-        downloadBtn.title = "Download";
-        downloadBtn.setAttribute("aria-label", "Download " + entry.name);
-        downloadBtn.appendChild(menuIcon("download"));
-        downloadBtn.addEventListener("click", function (e) {
-          e.stopPropagation();
-          downloadEntry(entry);
-        });
-        actions.appendChild(downloadBtn);
-      }
+      const downloadBtn = document.createElement("button");
+      downloadBtn.type = "button";
+      downloadBtn.className = "btn row-download icon-action";
+      downloadBtn.title = entry.isDir ? "Download as zip" : "Download";
+      downloadBtn.setAttribute("aria-label", "Download " + entry.name);
+      downloadBtn.appendChild(menuIcon("download"));
+      downloadBtn.addEventListener("click", function (e) {
+        e.stopPropagation();
+        downloadEntry(entry);
+      });
+      actions.appendChild(downloadBtn);
 
       const deleteBtn = document.createElement("button");
       deleteBtn.type = "button";
@@ -2221,6 +2242,20 @@
     const icon = document.createElement("div");
     icon.className = "card-icon";
     renderEntryIcon(icon, entry);
+    if (showThumbs && !entry.isDir && previewKind(entry.name) === "image") {
+      const thumb = document.createElement("img");
+      thumb.className = "card-thumb";
+      thumb.src = "/api/download?path=" + encodeURIComponent(entry.path);
+      thumb.alt = "";
+      thumb.loading = "lazy";
+      // An unreadable or vanished image falls back to the file emoji.
+      thumb.addEventListener("error", function () {
+        thumb.remove();
+        icon.textContent = iconFor(entry);
+      });
+      icon.textContent = "";
+      icon.appendChild(thumb);
+    }
 
     const name = document.createElement("div");
     name.className = "card-name";
@@ -2238,19 +2273,17 @@
     const actions = document.createElement("div");
     actions.className = "card-actions";
 
-    if (!entry.isDir) {
-      const downloadBtn = document.createElement("button");
-      downloadBtn.type = "button";
-      downloadBtn.className = "btn card-download icon-action";
-      downloadBtn.title = "Download";
-      downloadBtn.setAttribute("aria-label", "Download " + entry.name);
-      downloadBtn.appendChild(menuIcon("download"));
-      downloadBtn.addEventListener("click", function (e) {
-        e.stopPropagation();
-        downloadEntry(entry);
-      });
-      actions.appendChild(downloadBtn);
-    }
+    const downloadBtn = document.createElement("button");
+    downloadBtn.type = "button";
+    downloadBtn.className = "btn card-download icon-action";
+    downloadBtn.title = entry.isDir ? "Download as zip" : "Download";
+    downloadBtn.setAttribute("aria-label", "Download " + entry.name);
+    downloadBtn.appendChild(menuIcon("download"));
+    downloadBtn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      downloadEntry(entry);
+    });
+    actions.appendChild(downloadBtn);
 
     const deleteBtn = document.createElement("button");
     deleteBtn.type = "button";
@@ -3026,6 +3059,75 @@
     setStatus(message, true);
   }
 
+  // --- drag-and-drop upload ---
+  // Dropping files anywhere on the page uploads them into the folder currently
+  // shown; virtual views disable uploads, exactly like the 📤 button.
+  let dragDepth = 0;
+
+  // Only real file drags count: internal drags (column reorder) carry no
+  // "Files" type.
+  function dragCarriesFiles(e) {
+    if (!e.dataTransfer) return false;
+    const types = Array.prototype.slice.call(e.dataTransfer.types || []);
+    return types.indexOf("Files") !== -1;
+  }
+
+  function uploadsAllowed() {
+    return els.uploadToggle.disabled === false && uploadRequest === null;
+  }
+
+  function endDragHighlight() {
+    dragDepth = 0;
+    els.main.classList.remove("drag-over");
+  }
+
+  els.main.addEventListener("dragenter", function (e) {
+    if (!dragCarriesFiles(e) || !uploadsAllowed()) return;
+    e.preventDefault();
+    dragDepth++;
+    els.main.classList.add("drag-over");
+    setStatus("Drop files to upload them into this folder.", false);
+  });
+
+  els.main.addEventListener("dragover", function (e) {
+    if (!dragCarriesFiles(e) || !uploadsAllowed()) return;
+    // preventDefault is what allows the drop to fire at all.
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+  });
+
+  els.main.addEventListener("dragleave", function (e) {
+    if (!dragCarriesFiles(e)) return;
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) {
+      els.main.classList.remove("drag-over");
+      setStatus("", false);
+    }
+  });
+
+  els.main.addEventListener("drop", function (e) {
+    if (!dragCarriesFiles(e)) return;
+    e.preventDefault();
+    endDragHighlight();
+    if (!uploadsAllowed()) {
+      setStatus("Uploads are not available in this view.", true);
+      return;
+    }
+    if (e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files);
+  });
+
+  // A drop that misses the listing (a modal, the top bar) must not make the
+  // browser navigate to the dropped file.
+  document.addEventListener("dragover", function (e) {
+    if (dragCarriesFiles(e)) e.preventDefault();
+  });
+  document.addEventListener("drop", function (e) {
+    if (dragCarriesFiles(e)) {
+      e.preventDefault();
+      endDragHighlight();
+    }
+  });
+
   async function deleteEntry(entry) {
     const kind = entry.isDir ? "folder" : "file";
     const extra = entry.isDir ? " and everything inside it" : "";
@@ -3063,9 +3165,12 @@
   }
 
   function downloadEntry(entry) {
+    // Folders stream as zip archives; files download as they are.
     const a = document.createElement("a");
-    a.href = "/api/download?path=" + encodeURIComponent(entry.path);
-    a.download = entry.name;
+    a.href =
+      (entry.isDir ? "/api/download-zip?path=" : "/api/download?path=") +
+      encodeURIComponent(entry.path);
+    a.download = entry.isDir ? entry.name + ".zip" : entry.name;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -3094,6 +3199,7 @@
     properties: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/>',
     tag: '<path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.3"/>',
     eye: '<path d="M2.5 12s3.6-6.5 9.5-6.5S21.5 12 21.5 12s-3.6 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>',
+    image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M5 17.5l4.5-4.5 3 3 3.5-3.5 3.5 3.5"/>',
     theme: '<path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 1 0 10.5 10.5z"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M18.7 5.3l-1.4 1.4M6.7 17.3l-1.4 1.4"/>',
     note: '<path d="M20 4.5A1.5 1.5 0 0 0 18.5 3h-13A1.5 1.5 0 0 0 4 4.5v9A1.5 1.5 0 0 0 5.5 15H9l3.5 4.5V15h6A1.5 1.5 0 0 0 20 13.5z"/><path d="M8 8h8M8 11h5"/>',
@@ -3465,6 +3571,7 @@
         moveItem,
         copyItem,
         favoriteItem,
+        { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
         { separator: true },
         {
           label: isPinned(entry.path) ? "Unpin folder" : "Pin folder",

@@ -256,6 +256,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | GET    | `/api/metadata` | Metadata for one path (`/api/stat` is an alias) |
 | GET    | `/api/read`     | Text preview of a file (max 2 MiB)   |
 | GET    | `/api/download` | Raw file download (Content-Type follows the extension) |
+| GET    | `/api/download-zip` | Download a folder as a zip archive   |
 | GET    | `/api/info`     | Version, root path, disk usage, host info |
 | DELETE | `/api/delete`   | Delete a file or folder              |
 | POST   | `/api/mkdir`    | Create a folder                      |
@@ -303,6 +304,12 @@ are refused with `400`.
 responds with `{"removed": n}`. The trash folder itself is kept, a missing
 trash folder counts as nothing to remove, and this cannot be undone — the UI
 asks for confirmation first.
+
+`GET /api/download-zip?path=/docs` streams the whole folder as `docs.zip`,
+with the folder itself as the archive's root entry. Symlinks are stored as
+links and never followed, unreadable subtrees are skipped, and the response
+cannot report per-file failures once it has started. Zipping a file instead
+of a folder returns `400`.
 
 `GET /api/search?q=report` matches entry names containing `report`
 case-insensitively, walking the tree recursively from `path` (default `/`) with

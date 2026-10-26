@@ -285,6 +285,13 @@ main {
   margin: 0 auto;
 }
 
+/* Drop target highlight while dragging files over the page. */
+main.drag-over .listing,
+main.drag-over .grid {
+  outline: 2px dashed var(--accent);
+  outline-offset: 6px;
+}
+
 .status {
   margin-bottom: 1rem;
   padding: 0.7rem 0.9rem;
@@ -1439,6 +1446,17 @@ body[data-view="grid"] #columns-toggle {
 .card-icon {
   font-size: 2rem;
   line-height: 1;
+}
+
+/* Optional image thumbnails (Settings → Show image thumbnails) replace the
+   file emoji in grid cards. */
+.card-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--surface-2);
 }
 
 .card-name {
