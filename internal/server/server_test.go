@@ -461,3 +461,121 @@ func TestTrashEndpoint(t *testing.T) {
 		t.Fatalf("trash entry inside trash status = %d, want 400: %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestSearchEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	if err := os.Mkdir(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "report-final.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", ".hidden-report.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	get := func(query string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("GET", "/api/search?"+query, nil)
+		req.SetBasicAuth("admin", "secret")
+		return s.do(t, req)
+	}
+
+	rec := get("q=report")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Path      string        `json:"path"`
+		Entries   []files.Entry `json:"entries"`
+		Truncated bool          `json:"truncated"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Path != "/" || body.Truncated {
+		t.Fatalf("body = %+v, want path / and no truncation", body)
+	}
+	// The dotfile is skipped like /api/list skips it; the file inside the
+	// subfolder is found (the folder "docs" itself does not match "report").
+	if len(body.Entries) != 1 {
+		t.Fatalf("got %d entries, want 1: %+v", len(body.Entries), body.Entries)
+	}
+	if body.Entries[0].Path != "/docs/report-final.txt" || body.Entries[0].IsDir {
+		t.Fatalf("entry = %+v, want /docs/report-final.txt", body.Entries[0])
+	}
+
+	// hidden=1 reveals dot entries, again like /api/list.
+	rec = get("q=report&hidden=1")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("hidden status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode hidden response: %v", err)
+	}
+	if len(body.Entries) != 2 {
+		t.Fatalf("hidden got %d entries, want 2: %+v", len(body.Entries), body.Entries)
+	}
+
+	if rec := get("q="); rec.Code != http.StatusBadRequest {
+		t.Fatalf("empty query status = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if rec := get("q=report"); rec.Code != http.StatusOK {
+		t.Fatalf("basic auth search status = %d, want 200", rec.Code)
+	}
+
+	// Unauthenticated callers get the same JSON 401 as the other API routes.
+	req := httptest.NewRequest("GET", "/api/search?q=report", nil)
+	if rec := s.do(t, req); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", rec.Code)
+	}
+}
+
+func TestTrashEmptyEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	for _, name := range []string{"a.txt", "b.txt"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest("POST", "/api/trash?path="+url.QueryEscape("/"+name), nil)
+		req.SetBasicAuth("admin", "secret")
+		if rec := s.do(t, req); rec.Code != http.StatusOK {
+			t.Fatalf("trash %s status = %d: %s", name, rec.Code, rec.Body.String())
+		}
+	}
+
+	empty := func() *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/trash/empty", nil)
+		req.SetBasicAuth("admin", "secret")
+		return s.do(t, req)
+	}
+
+	rec := empty()
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Removed int `json:"removed"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Removed != 2 {
+		t.Fatalf("removed = %d, want 2", body.Removed)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, ".trash"))
+	if err != nil || len(entries) != 0 {
+		t.Fatalf("trash not emptied: %v, %d entries", err, len(entries))
+	}
+
+	// A second call removes nothing but still succeeds.
+	if rec := empty(); rec.Code != http.StatusOK {
+		t.Fatalf("second empty status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+}

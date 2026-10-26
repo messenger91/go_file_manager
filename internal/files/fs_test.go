@@ -2,6 +2,7 @@ package files
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -925,7 +926,7 @@ func TestTrashSymlinkTrashesLinkOnly(t *testing.T) {
 	}
 	root := t.TempDir()
 	if err := os.Symlink(target, filepath.Join(root, "link")); err != nil {
-		t.Fatal(err)
+		t.Skipf("symlinks unavailable: %v", err)
 	}
 	f := New(root)
 
@@ -938,5 +939,235 @@ func TestTrashSymlinkTrashesLinkOnly(t *testing.T) {
 	}
 	if data, err := os.ReadFile(target); err != nil || string(data) != "outside" {
 		t.Fatalf("link target changed: %q, %v", data, err)
+	}
+}
+
+func TestEmptyTrash(t *testing.T) {
+	root := t.TempDir()
+	f := New(root)
+	// keep.txt stays at the root and must survive; gone.txt is trashed.
+	if err := os.WriteFile(filepath.Join(root, "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "gone.txt"), []byte("gone"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Trash("/gone.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	removed, err := f.EmptyTrash()
+	if err != nil {
+		t.Fatalf("empty trash: %v", err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
+	}
+	if _, err := os.Stat(filepath.Join(root, TrashDir, "gone.txt")); !os.IsNotExist(err) {
+		t.Fatalf("trashed file survived: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, TrashDir)); err != nil {
+		t.Fatalf("trash folder itself must survive: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "keep.txt")); err != nil || string(data) != "keep" {
+		t.Fatalf("file outside the trash must be untouched: %q, %v", data, err)
+	}
+
+	// Emptying again is a no-op...
+	removed, err = f.EmptyTrash()
+	if err != nil || removed != 0 {
+		t.Fatalf("empty again = (%d, %v), want (0, nil)", removed, err)
+	}
+	// ...and so is emptying without a trash folder.
+	if err := os.Remove(filepath.Join(root, TrashDir)); err != nil {
+		t.Fatal(err)
+	}
+	removed, err = f.EmptyTrash()
+	if err != nil || removed != 0 {
+		t.Fatalf("empty without trash folder = (%d, %v), want (0, nil)", removed, err)
+	}
+}
+
+func TestEmptyTrashRemovesNestedFoldersAndSymlinks(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "target.txt"), []byte("outside"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+	if err := os.Mkdir(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "inner.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "target.txt"), filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if _, err := f.Trash("/docs"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Trash("/link.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	if removed, err := f.EmptyTrash(); err != nil || removed != 2 {
+		t.Fatalf("empty = (%d, %v), want (2, nil)", removed, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(outside, "target.txt")); err != nil || string(data) != "outside" {
+		t.Fatalf("symlink target must be untouched: %q, %v", data, err)
+	}
+}
+
+func TestSearchMatchesCaseInsensitivelyAndSortsLikeList(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "Reports"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "2024 report.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "unrelated.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	base, entries, err := f.Search("/", "REPORT", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != "/" {
+		t.Fatalf("base = %q, want /", base)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2: %+v", len(entries), entries)
+	}
+	// Directories sort before files regardless of name.
+	if !entries[0].IsDir || entries[0].Name != "Reports" {
+		t.Fatalf("first entry = %+v, want directory Reports", entries[0])
+	}
+	if entries[1].Name != "2024 report.txt" || entries[1].IsDir {
+		t.Fatalf("second entry = %+v, want file 2024 report.txt", entries[1])
+	}
+	if entries[1].Path != "/2024 report.txt" {
+		t.Fatalf("path = %q, want /2024 report.txt", entries[1].Path)
+	}
+}
+
+func TestSearchSkipsHiddenUnlessAsked(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".secret"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, ".hiddendir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".hiddendir", "needle.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "visible-needle.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+	if _, err := f.Trash("/visible-needle.txt"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Hidden: the dotfile, the dot folder's subtree and the trash all stay out.
+	_, entries, err := f.Search("/", "needle", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("got %d entries without showHidden, want 0: %+v", len(entries), entries)
+	}
+
+	_, entries, err = f.Search("/", "needle", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With showHidden the dotfile and the trash entry appear, but the dot
+	// folder itself ("hiddendir" does not contain "needle") does not.
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries with showHidden, want 2: %+v", len(entries), entries)
+	}
+	if entries[0].Path != "/.hiddendir/needle.txt" || entries[1].Path != "/.trash/visible-needle.txt" {
+		t.Fatalf("entries = %+v, want the hidden-dir and trash matches", entries)
+	}
+}
+
+func TestSearchScopesToStartFolder(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "needle.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "other"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "other", "needle.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	base, entries, err := f.Search("/docs", "needle", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base != "/docs" {
+		t.Fatalf("base = %q, want /docs", base)
+	}
+	if len(entries) != 1 || entries[0].Path != "/docs/needle.txt" {
+		t.Fatalf("entries = %+v, want only /docs/needle.txt", entries)
+	}
+}
+
+func TestSearchSkipsSymlinkedDirectories(t *testing.T) {
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "needle.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "linkdir")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	f := New(root)
+
+	_, entries, err := f.Search("/", "needle", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("search followed a symlinked directory: %+v", entries)
+	}
+}
+
+func TestSearchCapsResults(t *testing.T) {
+	root := t.TempDir()
+	for i := 0; i < MaxSearchResults+10; i++ {
+		name := fmt.Sprintf("capfile-%03d.txt", i)
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := New(root)
+
+	_, entries, err := f.Search("/", "capfile", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != MaxSearchResults {
+		t.Fatalf("got %d entries, want the %d cap", len(entries), MaxSearchResults)
+	}
+}
+
+func TestSearchEmptyQueryFails(t *testing.T) {
+	f := New(t.TempDir())
+	for _, q := range []string{"", "   "} {
+		if _, _, err := f.Search("/", q, false); !errors.Is(err, ErrInvalidName) {
+			t.Fatalf("Search(%q) error = %v, want ErrInvalidName", q, err)
+		}
 	}
 }

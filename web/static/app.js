@@ -9,6 +9,7 @@
     viewer: document.getElementById("viewer"),
     viewerName: document.getElementById("viewer-name"),
     viewerBody: document.getElementById("viewer-body"),
+    viewerMedia: document.getElementById("viewer-media"),
     viewerDownload: document.getElementById("viewer-download"),
     viewerClose: document.getElementById("viewer-close"),
     viewerDelete: document.getElementById("viewer-delete"),
@@ -79,6 +80,9 @@
     noteSave: document.getElementById("note-save"),
     noteCancel: document.getElementById("note-cancel"),
     noteRemove: document.getElementById("note-remove"),
+    searchInput: document.getElementById("search-input"),
+    searchToggle: document.getElementById("search-toggle"),
+    emptyTrash: document.getElementById("empty-trash"),
     sizeToggle: document.getElementById("size-toggle"),
     grid: document.getElementById("grid"),
   };
@@ -295,7 +299,24 @@
 
   // The colour of the tag currently shown as a virtual folder, or null.
   let tagView = null;
-  let tagViewSeq = 0;
+
+  // Virtual views (tag, trash, search) share one sequence counter: every view
+  // bumps it on entry and on exit, so a slow response for a view the user has
+  // already left can no longer overwrite the listing.
+  let viewSeq = 0;
+  let trashView = false;
+  // The query of the search currently shown as a virtual folder, or null.
+  let searchView = null;
+  let searchOpen = false;
+
+  // The trash folder lives at the root and starts with a dot, so listings
+  // hide it unless hidden entries are requested.
+  const TRASH_PATH = "/.trash";
+
+  // True when path is the trash folder itself or an entry inside it.
+  function isInTrash(path) {
+    return path === TRASH_PATH || path.indexOf(TRASH_PATH + "/") === 0;
+  }
 
   // Dot entries are hidden by default; the settings menu toggles them.
   let showHidden = loadStored("showHidden", false) === true;
@@ -678,17 +699,51 @@
     els.tagsToggle.setAttribute("aria-expanded", "true");
   }
 
-  // --- tag view: a tag shown as a virtual folder ---
-  function setTagViewUpload(inTagView) {
-    els.uploadToggle.disabled = inTagView;
-    const label = inTagView
-      ? "Uploads are not available in a tag view"
+  // --- virtual views: a tag, the trash, or search results shown as a folder ---
+  // All three share one setup: uploads are off, the filter resets, and the
+  // other virtual views are left first. Returns the new sequence number.
+  function enterVirtualView(record, placeholder, filterLabel) {
+    if (record) {
+      navHistory.push(currentPath);
+      if (navHistory.length > 50) navHistory.shift();
+    }
+    tagView = null;
+    trashView = false;
+    searchView = null;
+    const seq = ++viewSeq;
+    setUploadDisabled(true);
+    els.emptyTrash.hidden = true;
+    closeSearchBar();
+    setStatus("");
+    closeViewer();
+    filterText = "";
+    els.filter.value = "";
+    els.filter.placeholder = placeholder;
+    els.filter.setAttribute("aria-label", filterLabel);
+    return seq;
+  }
+
+  function setUploadDisabled(disabled) {
+    els.uploadToggle.disabled = disabled;
+    const label = disabled
+      ? "Uploads are not available in this view"
       : "Upload files to this folder";
     els.uploadToggle.title = label;
     els.uploadToggle.setAttribute("aria-label", label);
   }
 
-  function renderTagBreadcrumbs(color) {
+  // Hides the search bar and brings the filter input back. Exiting a search
+  // *view* (navigating away) is the caller's job.
+  function closeSearchBar() {
+    searchOpen = false;
+    els.searchInput.hidden = true;
+    els.filter.hidden = false;
+    els.searchToggle.setAttribute("aria-expanded", "false");
+  }
+
+  // Shared breadcrumb start for the virtual views: clears the bar and adds
+  // the Home link and its separator; the caller appends the current crumb.
+  function startVirtualCrumbs() {
     els.breadcrumbs.textContent = "";
 
     const home = document.createElement("a");
@@ -707,6 +762,18 @@
     sep.setAttribute("aria-hidden", "true");
     sep.textContent = "›";
     els.breadcrumbs.appendChild(sep);
+  }
+
+  // Long virtual paths scroll sideways like real ones: keep the end visible.
+  function finishCrumbs() {
+    setTimeout(function () {
+      els.breadcrumbs.scrollLeft = els.breadcrumbs.scrollWidth;
+      updateBreadcrumbFade();
+    }, 0);
+  }
+
+  function renderTagBreadcrumbs(color) {
+    startVirtualCrumbs();
 
     const tag = document.createElement("span");
     tag.className = "crumb current";
@@ -719,30 +786,16 @@
     tag.appendChild(document.createTextNode(colorLabel(color)));
     els.breadcrumbs.appendChild(tag);
 
-    setTimeout(function () {
-      els.breadcrumbs.scrollLeft = els.breadcrumbs.scrollWidth;
-      updateBreadcrumbFade();
-    }, 0);
+    finishCrumbs();
   }
 
   // Lists every entry carrying one colour, fetched fresh so sizes and types
   // are current. Tags whose path no longer exists are dropped silently.
   async function showTagView(color, options) {
     const record = !options || options.recordHistory !== false;
-    if (record) {
-      navHistory.push(currentPath);
-      if (navHistory.length > 50) navHistory.shift();
-    }
+    const seq = enterVirtualView(record, "Filter this tag…", "Filter entries in this tag");
     tagView = color;
-    const seq = ++tagViewSeq;
-    setStatus("");
-    closeViewer();
-    filterText = "";
-    els.filter.value = "";
-    els.filter.placeholder = "Filter this tag…";
-    els.filter.setAttribute("aria-label", "Filter entries in this tag");
     renderTagBreadcrumbs(color);
-    setTagViewUpload(true);
 
     const paths = tagPaths(color);
     let entries = [];
@@ -754,7 +807,7 @@
           });
         })
       );
-      if (seq !== tagViewSeq || tagView !== color) return;
+      if (seq !== viewSeq || tagView !== color) return;
       const alive = [];
       let pruned = false;
       let failed = 0;
@@ -784,15 +837,137 @@
         );
       }
     }
-    if (seq !== tagViewSeq || tagView !== color) return;
+    if (seq !== viewSeq || tagView !== color) return;
     renderEntries(entries);
     updateBackButton();
   }
 
-  // Mutations in a tag view should stay there instead of jumping back to the
-  // folder the tag view was opened from.
+  // --- trash view: the hidden /.trash folder shown as a virtual folder ---
+  function renderTrashBreadcrumbs() {
+    startVirtualCrumbs();
+
+    const trash = document.createElement("span");
+    trash.className = "crumb current";
+    trash.setAttribute("aria-current", "page");
+    trash.title = "Trash";
+    trash.textContent = "Trash";
+    els.breadcrumbs.appendChild(trash);
+
+    finishCrumbs();
+  }
+
+  // Listing /.trash needs hidden=1 even when dot entries are hidden, so a
+  // trashed dotfile stays visible here.
+  async function showTrashView(options) {
+    const record = !options || options.recordHistory !== false;
+    const seq = enterVirtualView(record, "Filter the trash…", "Filter entries in the trash");
+    trashView = true;
+    renderTrashBreadcrumbs();
+    els.emptyTrash.hidden = false;
+    els.emptyTrash.disabled = true;
+
+    try {
+      const data = await api("/api/list", TRASH_PATH, "&hidden=1");
+      if (!trashView || seq !== viewSeq) return;
+      renderEntries(data.entries);
+      els.emptyTrash.disabled = data.entries.length === 0;
+    } catch (err) {
+      if (!trashView || seq !== viewSeq) return;
+      setStatus("Failed to open the trash: " + err.message, true);
+      renderEntries([]);
+    }
+    updateBackButton();
+  }
+
+  // Permanently removes everything in the trash after a confirmation.
+  async function emptyTrash() {
+    const ok = await confirmDialog({
+      title: "Empty trash",
+      message: "Permanently delete everything in the trash? This cannot be undone.",
+      confirmLabel: "Empty trash",
+    });
+    if (!ok) return;
+    try {
+      const data = await sendJSON("POST", "/api/trash/empty");
+      els.emptyTrash.disabled = true;
+      await refreshCurrentView();
+      setStatus(
+        "Deleted " + data.removed + " " + (data.removed === 1 ? "item" : "items") +
+        " from the trash.",
+        false
+      );
+    } catch (err) {
+      setStatus("Failed to empty the trash: " + err.message, true);
+    }
+  }
+
+  // --- search view: recursive filename matches shown as a virtual folder ---
+  function renderSearchBreadcrumbs(query) {
+    startVirtualCrumbs();
+
+    const crumb = document.createElement("span");
+    crumb.className = "crumb current";
+    crumb.setAttribute("aria-current", "page");
+    crumb.title = "Search results";
+    crumb.textContent = "Search: " + query;
+    els.breadcrumbs.appendChild(crumb);
+
+    finishCrumbs();
+  }
+
+  // Searches from the root; the current folder is left in navHistory like any
+  // navigation, except when re-running the query already on display.
+  async function runSearch(query, options) {
+    const record = (!options || options.recordHistory !== false) && searchView === null;
+    const seq = enterVirtualView(record, "Filter these results…", "Filter search results");
+    searchView = query;
+    renderSearchBreadcrumbs(query);
+    searchOpen = true;
+    els.searchInput.hidden = false;
+    els.searchInput.value = query;
+    els.filter.hidden = true;
+    els.searchToggle.setAttribute("aria-expanded", "true");
+
+    try {
+      const data = await sendJSON(
+        "GET",
+        "/api/search?q=" + encodeURIComponent(query) + (showHidden ? "&hidden=1" : "")
+      );
+      if (searchView !== query || seq !== viewSeq) return;
+      renderEntries(data.entries);
+      if (data.truncated) {
+        setStatus(
+          "Showing the first " + data.entries.length + " matches — narrow the query to see more.",
+          false
+        );
+      }
+    } catch (err) {
+      if (searchView !== query || seq !== viewSeq) return;
+      setStatus("Search failed: " + err.message, true);
+      renderEntries([]);
+    }
+    updateBackButton();
+  }
+
+  function toggleSearch() {
+    if (searchOpen) {
+      closeSearchBar();
+      if (searchView !== null) navigate(currentPath, { recordHistory: false });
+      return;
+    }
+    searchOpen = true;
+    els.filter.hidden = true;
+    els.searchInput.hidden = false;
+    els.searchToggle.setAttribute("aria-expanded", "true");
+    els.searchInput.focus();
+  }
+
+  // Mutations in a virtual view should stay there instead of jumping back to
+  // the folder the view was opened from.
   function refreshCurrentView() {
     if (tagView !== null) return showTagView(tagView, { recordHistory: false });
+    if (trashView) return showTrashView({ recordHistory: false });
+    if (searchView !== null) return runSearch(searchView, { recordHistory: false });
     return navigate(currentPath);
   }
 
@@ -822,6 +997,7 @@
     items.push.apply(items, themeMenuItems());
     items.push.apply(items, viewMenuItems());
     items.push({ separator: true });
+    items.push({ label: "Open trash", icon: "trash", action: function () { showTrashView(); } });
     items.push({ label: "Server info", icon: "info", action: function () { openInfo(); } });
     items.push({ separator: true });
     items.push(
@@ -1657,13 +1833,15 @@
   function emptyText() {
     if (currentEntries.length > 0) return "No files match your filter.";
     if (tagView !== null) return "Nothing is tagged " + colorLabel(tagView).toLowerCase() + " yet.";
+    if (trashView) return "The trash is empty.";
+    if (searchView !== null) return 'Nothing matches "' + searchView + '".';
     return "This folder is empty.";
   }
 
   // Pinned folders are shortcuts: they lead the listing and are not repeated in
   // the normal entries of the current folder.
   function pinnedEntries() {
-    if (tagView !== null) return [];
+    if (tagView !== null || trashView || searchView !== null) return [];
     const query = filterText.trim().toLowerCase();
     return pinnedFolders
       .filter(function (item) {
@@ -1681,8 +1859,10 @@
   }
 
   function excludePinned(entries) {
-    // A tag view has no pinned section, so nothing is taken out of it.
-    if (pinnedFolders.length === 0 || tagView !== null) return entries;
+    // A virtual view has no pinned section, so nothing is taken out of it.
+    if (pinnedFolders.length === 0 || tagView !== null || trashView || searchView !== null) {
+      return entries;
+    }
     const pinned = {};
     pinnedFolders.forEach(function (item) {
       pinned[item.path] = true;
@@ -2139,10 +2319,15 @@
 
   async function navigate(path, options) {
     const record = !options || options.recordHistory !== false;
-    if (tagView !== null) {
+    if (tagView !== null || trashView || searchView !== null) {
+      // Leave whatever virtual view was open and restore the folder UI.
       tagView = null;
-      tagViewSeq++;
-      setTagViewUpload(false);
+      trashView = false;
+      searchView = null;
+      viewSeq++;
+      setUploadDisabled(false);
+      closeSearchBar();
+      els.emptyTrash.hidden = true;
       els.filter.placeholder = "Filter this folder…";
       els.filter.setAttribute("aria-label", "Filter files in this folder");
     }
@@ -2171,6 +2356,48 @@
     updateBackButton();
   }
 
+  // Extensions the viewer can show without /api/read. Images, video and audio
+  // stream straight from /api/download; PDFs need its Content-Type to render
+  // in an <embed>.
+  const IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "svg", "bmp", "avif", "ico"];
+  const VIDEO_EXTS = ["mp4", "webm", "mov", "m4v"];
+  const AUDIO_EXTS = ["mp3", "wav", "ogg", "oga", "m4a", "flac", "aac"];
+
+  // What kind of preview a file gets: "image", "video", "audio", "pdf" or
+  // "text" (the default, fetched through /api/read).
+  function previewKind(name) {
+    const dot = name.lastIndexOf(".");
+    if (dot < 0 || dot === name.length - 1) return "text";
+    const ext = name.slice(dot + 1).toLowerCase();
+    if (IMAGE_EXTS.indexOf(ext) !== -1) return "image";
+    if (VIDEO_EXTS.indexOf(ext) !== -1) return "video";
+    if (AUDIO_EXTS.indexOf(ext) !== -1) return "audio";
+    if (ext === "pdf") return "pdf";
+    return "text";
+  }
+
+  function renderMediaPreview(entry) {
+    const src = "/api/download?path=" + encodeURIComponent(entry.path);
+    const kind = previewKind(entry.name);
+    let el;
+    if (kind === "image") {
+      el = document.createElement("img");
+      el.alt = entry.name;
+    } else if (kind === "video") {
+      el = document.createElement("video");
+      el.controls = true;
+      el.preload = "metadata";
+    } else if (kind === "audio") {
+      el = document.createElement("audio");
+      el.controls = true;
+    } else {
+      el = document.createElement("embed");
+      el.type = "application/pdf";
+    }
+    el.src = src;
+    els.viewerMedia.appendChild(el);
+  }
+
   async function openFile(entry) {
     cancelEdit();
     openEntry = entry;
@@ -2178,10 +2405,24 @@
     recordRecent(entry);
     els.viewer.hidden = false;
     els.viewerName.textContent = entry.name;
-    els.viewerBody.textContent = "Loading…";
     els.viewerDownload.href = "/api/download?path=" + encodeURIComponent(entry.path);
     els.viewerDownload.setAttribute("download", entry.name);
     els.viewerEdit.hidden = true;
+    els.viewerMedia.textContent = "";
+    els.viewerBody.textContent = "Loading…";
+
+    const kind = previewKind(entry.name);
+    if (kind !== "text") {
+      // Media streams from /api/download and there is nothing to edit.
+      els.viewerBody.hidden = true;
+      els.viewerBody.textContent = "";
+      els.viewerMedia.hidden = false;
+      renderMediaPreview(entry);
+      return;
+    }
+
+    els.viewerMedia.hidden = true;
+    els.viewerBody.hidden = false;
 
     try {
       const data = await api("/api/read", entry.path);
@@ -2200,6 +2441,9 @@
     cancelEdit();
     els.viewer.hidden = true;
     els.viewerBody.textContent = "";
+    // Dropping the media element also stops a playing video or audio.
+    els.viewerMedia.textContent = "";
+    els.viewerMedia.hidden = true;
     openEntry = null;
   }
 
@@ -2384,10 +2628,15 @@
     pickerMode = mode;
     pickerEntry = { name: entry.name, path: entry.path, isDir: !!entry.isDir };
     pickerPath = parentOf(entry.path);
-    els.destinationTitle.textContent =
-      (mode === "move" ? "Move " : "Copy ") + (entry.isDir ? "folder" : "file");
+    const noun = entry.isDir ? "folder" : "file";
+    if (mode === "restore") {
+      els.destinationTitle.textContent = "Restore " + noun;
+      els.destinationOk.textContent = "Restore here";
+    } else {
+      els.destinationTitle.textContent = (mode === "move" ? "Move " : "Copy ") + noun;
+      els.destinationOk.textContent = mode === "move" ? "Move here" : "Copy here";
+    }
     els.destinationName.textContent = entry.path;
-    els.destinationOk.textContent = mode === "move" ? "Move here" : "Copy here";
     els.destinationModal.hidden = false;
     loadPickerFolders();
   }
@@ -2421,6 +2670,27 @@
       n++;
     }
     return name;
+  }
+
+  // "note.txt" -> "note 2.txt", then "note 3.txt"… the same " 2"-before-the-
+  // extension convention the server's trash uses, offered when a restore would
+  // land on a name the destination folder already holds.
+  function uniqueRestoreName(name, entries) {
+    const taken = {};
+    (entries || []).forEach(function (item) {
+      taken[item.name] = true;
+    });
+    if (!taken[name]) return name;
+    let base = name;
+    let ext = "";
+    const dot = name.lastIndexOf(".");
+    if (dot > 0 && dot < name.length - 1) {
+      base = name.slice(0, dot);
+      ext = name.slice(dot);
+    }
+    let n = 2;
+    while (taken[base + " " + n + ext]) n++;
+    return base + " " + n + ext;
   }
 
   function pickerRow(kind, label, path) {
@@ -2501,9 +2771,12 @@
   function updatePickerState() {
     if (!pickerEntry) return;
     const here = parentOf(pickerEntry.path) === pickerPath;
-    if (pickerMode === "move" && here) {
+    if (pickerMode !== "copy" && here) {
       els.destinationOk.disabled = true;
-      els.destinationHint.textContent = "Already in this folder — open another one below.";
+      els.destinationHint.textContent =
+        pickerMode === "restore"
+          ? "Pick a folder to restore into."
+          : "Already in this folder — open another one below.";
       return;
     }
     els.destinationOk.disabled = false;
@@ -2513,13 +2786,19 @@
         'Copy as "' + uniqueCopyName(pickerEntry, pickerEntries) + '", or open another folder.';
       return;
     }
+    const verb = pickerMode === "move" ? "move" : pickerMode === "restore" ? "restore" : "copy";
     const label = pickerPath === "/" ? "Home" : pathName(pickerPath);
+    // A restore onto a taken name is renamed rather than refused.
+    const finalName =
+      pickerMode === "restore" ? uniqueRestoreName(pickerEntry.name, pickerEntries) : pickerEntry.name;
     els.destinationHint.textContent =
       "Open a folder to go deeper, or " +
-      (pickerMode === "move" ? "move" : "copy") +
+      verb +
       ' into "' +
       label +
-      '".';
+      '"' +
+      (finalName !== pickerEntry.name ? ' as "' + finalName + '"' : "") +
+      ".";
   }
 
   async function confirmPicker() {
@@ -2528,20 +2807,27 @@
     const mode = pickerMode;
     const dir = pickerPath;
     const here = parentOf(entry.path) === dir;
-    const name = mode === "copy" && here ? uniqueCopyName(entry, pickerEntries) : entry.name;
+    const name =
+      mode === "restore"
+        ? uniqueRestoreName(entry.name, pickerEntries)
+        : mode === "copy" && here
+          ? uniqueCopyName(entry, pickerEntries)
+          : entry.name;
     const destination = dir === "/" ? "/" + name : dir + "/" + name;
     try {
-      if (mode === "move") {
-        await apiMove(entry.path, destination);
-      } else {
+      if (mode === "copy") {
         await apiCopy(entry.path, destination);
+      } else {
+        await apiMove(entry.path, destination);
       }
       closePicker();
-      if (mode === "move") rekeyFolderPaths(entry.path, destination);
+      if (mode !== "copy") rekeyFolderPaths(entry.path, destination);
       closeViewer();
       await refreshCurrentView();
       if (mode === "move") {
         setStatus('Moved "' + entry.name + '" to ' + dir + ".", false);
+      } else if (mode === "restore") {
+        setStatus('Restored "' + entry.name + '" to ' + dir + ".", false);
       } else if (name !== entry.name) {
         setStatus('Copied "' + entry.name + '" as "' + name + '".', false);
       } else {
@@ -2798,6 +3084,7 @@
     download: '<path d="M12 4v11"/><path d="M7 10.5l5 5 5-5"/><path d="M5 20h14"/>',
     delete: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/>',
     trash: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M12 10.5v4.5"/><path d="M9.9 12.9l2.1 2.1 2.1-2.1"/>',
+    restore: '<path d="M4 9.5h9.5a5 5 0 1 1 0 10H9"/><path d="M8 5.5l-4 4 4 4"/>',
     newFolder: '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>',
     newFile: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6M9 15h6"/>',
     upload: '<path d="M12 20V9"/><path d="M7 13.5l5-5 5 5"/><path d="M5 4h14"/>',
@@ -2949,10 +3236,11 @@
   }
 
   function globalMenuItems() {
-    // A tag view is a virtual folder, so creating and uploading make no sense
-    // there; the entries themselves can still be acted on.
+    // A virtual view (tag, trash, search results) is not a real folder, so
+    // creating and uploading make no sense there; the entries themselves can
+    // still be acted on.
     const items =
-      tagView !== null
+      tagView !== null || trashView || searchView !== null
         ? []
         : [
             { label: "New folder", icon: "newFolder", action: function () { createFolder(); } },
@@ -2960,6 +3248,9 @@
             { label: "Upload files…", icon: "upload", action: function () { els.fileInput.click(); } },
             { separator: true },
           ];
+    if (!trashView) {
+      items.push({ label: "Open trash", icon: "trash", action: function () { showTrashView(); } });
+    }
     return items
       .concat(viewMenuItems())
       .concat([
@@ -3131,51 +3422,92 @@
       icon: "star",
       action: function () { toggleFavorite(entry); },
     };
-    const items = entry.isDir
-      ? [
-          { label: "Open", icon: "open", action: function () { navigate(entry.path); } },
-          { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
-          moveItem,
-          copyItem,
-          favoriteItem,
-          { separator: true },
-          {
-            label: isPinned(entry.path) ? "Unpin folder" : "Pin folder",
-            icon: "pin",
-            action: function () { togglePin(entry); },
-          },
-          {
-            swatches: true,
-            current: folderColor(entry.path),
-            onPick: function (color) { setFolderColor(entry, color); },
-          },
-          { separator: true },
-          hideItem,
-          noteItem,
-          { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
-          { label: "Move to trash", icon: "trash", action: function () { trashEntry(entry); } },
-          { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
-        ]
-      : [
-          { label: "Preview", icon: "preview", action: function () { openFile(entry); } },
-          { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
-          moveItem,
-          copyItem,
-          favoriteItem,
-          { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
-          { separator: true },
-          {
-            swatches: true,
-            current: folderColor(entry.path),
-            onPick: function (color) { setFolderColor(entry, color); },
-          },
-          { separator: true },
-          hideItem,
-          noteItem,
-          { label: "Properties", icon: "properties", action: function () { showProperties(entry); } },
-          { label: "Move to trash", icon: "trash", action: function () { trashEntry(entry); } },
-          { label: "Delete", icon: "delete", danger: true, action: function () { deleteEntry(entry); } },
-        ];
+    const restoreItem = {
+      label: "Restore…",
+      icon: "restore",
+      action: function () { openPicker(entry, "restore"); },
+    };
+    const propertiesItem = {
+      label: "Properties",
+      icon: "properties",
+      action: function () { showProperties(entry); },
+    };
+    const deleteItem = {
+      label: "Delete",
+      icon: "delete",
+      danger: true,
+      action: function () { deleteEntry(entry); },
+    };
+
+    let items;
+    if (isInTrash(entry.path) && entry.path !== TRASH_PATH) {
+      // Inside the trash: restoring or deleting for real are the useful moves;
+      // tagging, notes and moving a trashed entry around only add noise.
+      // Delete here is the permanent one.
+      items = entry.isDir
+        ? [
+            { label: "Open", icon: "open", action: function () { navigate(entry.path); } },
+            restoreItem,
+            propertiesItem,
+            deleteItem,
+          ]
+        : [
+            { label: "Preview", icon: "preview", action: function () { openFile(entry); } },
+            restoreItem,
+            { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
+            propertiesItem,
+            deleteItem,
+          ];
+    } else if (entry.isDir) {
+      items = [
+        { label: "Open", icon: "open", action: function () { navigate(entry.path); } },
+        { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
+        moveItem,
+        copyItem,
+        favoriteItem,
+        { separator: true },
+        {
+          label: isPinned(entry.path) ? "Unpin folder" : "Pin folder",
+          icon: "pin",
+          action: function () { togglePin(entry); },
+        },
+        {
+          swatches: true,
+          current: folderColor(entry.path),
+          onPick: function (color) { setFolderColor(entry, color); },
+        },
+        { separator: true },
+        hideItem,
+        noteItem,
+        propertiesItem,
+      ];
+      // Trashing the trash folder itself is refused by the server anyway.
+      if (entry.path !== TRASH_PATH) {
+        items.push({ label: "Move to trash", icon: "trash", action: function () { trashEntry(entry); } });
+      }
+      items.push(deleteItem);
+    } else {
+      items = [
+        { label: "Preview", icon: "preview", action: function () { openFile(entry); } },
+        { label: "Rename", icon: "rename", action: function () { renameEntry(entry); } },
+        moveItem,
+        copyItem,
+        favoriteItem,
+        { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
+        { separator: true },
+        {
+          swatches: true,
+          current: folderColor(entry.path),
+          onPick: function (color) { setFolderColor(entry, color); },
+        },
+        { separator: true },
+        hideItem,
+        noteItem,
+        propertiesItem,
+        { label: "Move to trash", icon: "trash", action: function () { trashEntry(entry); } },
+        deleteItem,
+      ];
+    }
     items.push({ separator: true });
     items.push.apply(items, globalMenuItems());
     buildMenu(x, y, items, entry.name);
@@ -3183,7 +3515,14 @@
   }
 
   function showViewMenu(x, y) {
-    const title = tagView !== null ? colorLabel(tagView) + " tag" : currentPath;
+    const title =
+      tagView !== null
+        ? colorLabel(tagView) + " tag"
+        : trashView
+          ? "Trash"
+          : searchView !== null
+            ? "Search results"
+            : currentPath;
     buildMenu(x, y, globalMenuItems(), title);
     els.contextMenu.dataset.source = "view";
   }
@@ -3452,6 +3791,32 @@
       e.stopPropagation();
     }
   });
+
+  // --- search ---
+  els.searchToggle.addEventListener("click", function (e) {
+    e.stopPropagation();
+    toggleSearch();
+  });
+
+  els.searchInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      const query = els.searchInput.value.trim();
+      if (query === "") return;
+      runSearch(query);
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      if (els.searchInput.value !== "") {
+        els.searchInput.value = "";
+        els.searchInput.focus();
+        return;
+      }
+      closeSearchBar();
+      if (searchView !== null) navigate(currentPath, { recordHistory: false });
+    }
+  });
+
+  // --- trash ---
+  els.emptyTrash.addEventListener("click", emptyTrash);
 
   // Sorting is delegated so the header can be rebuilt when columns change.
   els.head.addEventListener("click", function (e) {

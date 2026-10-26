@@ -252,9 +252,10 @@ redirected to `/login`. `POST /logout` ends the session.
 | Method | Path            | Description                          |
 | ------ | --------------- | ------------------------------------ |
 | GET    | `/api/list`     | List a directory (`?path=/sub`; add `&hidden=1` for dot entries) |
+| GET    | `/api/search`   | Recursive filename search (`?q=term`) |
 | GET    | `/api/metadata` | Metadata for one path (`/api/stat` is an alias) |
 | GET    | `/api/read`     | Text preview of a file (max 2 MiB)   |
-| GET    | `/api/download` | Raw file download                    |
+| GET    | `/api/download` | Raw file download (Content-Type follows the extension) |
 | GET    | `/api/info`     | Version, root path, disk usage, host info |
 | DELETE | `/api/delete`   | Delete a file or folder              |
 | POST   | `/api/mkdir`    | Create a folder                      |
@@ -262,6 +263,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | POST   | `/api/move`     | Move a file or folder to another path|
 | POST   | `/api/copy`     | Copy a file or folder to another path|
 | POST   | `/api/trash`    | Move a file or folder into `/.trash` |
+| POST   | `/api/trash/empty` | Permanently remove everything in `/.trash` |
 | POST   | `/api/create`   | Create an empty file                 |
 | PUT    | `/api/write`    | Overwrite a file (body is new content)|
 | POST   | `/api/upload`   | Upload one or more files (multipart) |
@@ -291,11 +293,22 @@ apply.
 `POST /api/trash?path=/sub/old.txt` moves an entry into the trash folder
 (`/.trash` at the root), creating that folder on first use; the response's
 `path` field is the trashed entry's new location. Because `/.trash` is a dot
-entry, listings hide it unless `&hidden=1` is passed — enable "Show hidden
-files" in the UI to browse it and restore entries with a normal move. Trashing
-the same name twice never overwrites: the second entry lands as `old 2.txt`. The
-root, the trash folder itself and entries already inside it are refused with
-`400`.
+entry, listings hide it unless `&hidden=1` is passed — the UI's trash view
+(Settings → Open trash) lists it and restores entries with a normal move.
+Trashing the same name twice never overwrites: the second entry lands as
+`old 2.txt`. The root, the trash folder itself and entries already inside it
+are refused with `400`.
+
+`POST /api/trash/empty` permanently removes every entry inside `/.trash` and
+responds with `{"removed": n}`. The trash folder itself is kept, a missing
+trash folder counts as nothing to remove, and this cannot be undone — the UI
+asks for confirmation first.
+
+`GET /api/search?q=report` matches entry names containing `report`
+case-insensitively, walking the tree recursively from `path` (default `/`) with
+the same dot-entry rules as `/api/list`. Directory symlinks are never followed,
+results are sorted like a listing (folders first) and capped at 200
+(`"truncated": true` marks a cut-off result), and an empty query returns `400`.
 
 `POST /api/create?path=/sub/note.txt` creates an empty file (`409` if it exists).
 `PUT /api/write?path=/sub/note.txt` replaces a file's contents with the raw

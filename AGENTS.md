@@ -30,8 +30,9 @@ make fmt            # gofmt
 Single test: `go test ./internal/files -run TestResolveStaysWithinRoot`
 
 Tests live in `internal/files` (root confinement, symlink escapes, listing order, delete
-safety) and `internal/server` (login/session flow, auth redirects, logout);
-`internal/config` has none.
+safety) and `internal/server` (login/session flow, auth redirects, logout), plus small
+ones in `internal/host` (smoke test of `Collect()`) and `internal/version` (semver check
+on the constant); `internal/config` has none.
 
 Always run `make fmt vet test` before finishing; all three currently pass. **Bump the version**
 in `internal/version/version.go` with every change — minor for a feature, patch for a fix
@@ -42,9 +43,9 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - `main.go` — entrypoint; embeds `web/` via `//go:embed all:web` and serves it.
 - `internal/config` — env/`.env` loading. Precedence: **process env > `.env` > defaults**.
   `.env` is read from the current working directory.
-- `internal/files` — root-confined filesystem access (`List`, `Stat`, `ReadFile`, `Open`,
-  `Delete`, `Mkdir`, `Rename`, `Move`, `Copy`, `Trash`, `Create`, `Write`, `Upload`, `Disk`).
-  This is the security boundary; test changes here.
+- `internal/files` — root-confined filesystem access (`List`, `Search`, `Stat`, `ReadFile`,
+  `Open`, `Delete`, `Mkdir`, `Rename`, `Move`, `Copy`, `Trash`, `EmptyTrash`, `Create`,
+  `Write`, `Upload`, `Disk`). This is the security boundary; test changes here.
 - `internal/server` — HTTP routes, authentication (login form + sessions), JSON/error
   handling.
 - `internal/host` — host info for `GET /api/info` (hostname, OS name, arch, uptime, load
@@ -91,15 +92,26 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   upload over the limit is rejected by `MaxBytesReader` and mapped to `413` with a
   "larger than the 50 MB limit" message (the limit is on the **whole multipart body**, so
   it includes MIME framing overhead).
-- Move and copy share one destination picker (`#destination-modal`). "Move to…" and
-  "Copy to…" in the context menu call `openPicker(entry, "move"|"copy")`; it starts at the
-  entry's parent, lists only folders from `/api/list` (excluding the entry itself, so its
-  subtree can never be entered), focuses the first row, and swaps the title and OK label
-  ("Move here"/"Copy here"). Move is disabled while the shown folder is the current parent;
-  copy is allowed there and duplicates under `uniqueCopyName()` ("note copy.txt", then
-  "note copy 2.txt"), shown in the hint. Confirming posts to `/api/move` or `/api/copy`,
-  refreshes the listing and, for moves only, runs `rekeyFolderPaths()` so pins, favorites,
-  tags, notes, hidden marks and recents follow the subtree. A copy inherits none of them.
+- Media preview: `openFile()` calls `previewKind(name)` — "image", "video", "audio" or
+  "pdf" for the extension lists at the top of app.js, "text" otherwise. Text keeps the
+  old `/api/read` path (≤2 MiB, editable when no NUL bytes); the other kinds render into
+  `#viewer-media` (an `<img>`/`<video controls>`/`<audio controls>`/`<embed
+  type="application/pdf">` streaming from `/api/download`) with the `<pre>` body hidden,
+  and Edit is always hidden — only Delete/Rename/Download make sense. `/api/download`
+  sets `Content-Type` from the `mediaTypes` map in server.go (browsers sniff `<img>` and
+  `<video>` by content, but `<embed>` needs the real type); the Disposition stays
+  `attachment`, so scripts still get a download. `closeViewer()` empties `#viewer-media`,
+  which also stops playback.
+- Move, copy and restore share one destination picker (`#destination-modal`). "Move to…"
+  and "Copy to…" in the context menu call `openPicker(entry, "move"|"copy")`; it starts at
+  the entry's parent, lists only folders from `/api/list` (excluding the entry itself, so
+  its subtree can never be entered), focuses the first row, and swaps the title and OK
+  label ("Move here"/"Copy here"). Move is disabled while the shown folder is the current
+  parent; copy is allowed there and duplicates under `uniqueCopyName()` ("note copy.txt",
+  then "note copy 2.txt"), shown in the hint. Confirming posts to `/api/move` or
+  `/api/copy`, refreshes the listing and, for non-copies, runs `rekeyFolderPaths()` so
+  pins, favorites, tags, notes, hidden marks and recents follow the subtree. A copy
+  inherits none of them.
 - `POST /api/move?from=/a&to=/b/a` calls `files.Move`; `POST /api/copy?...` calls
   `files.Copy`. Both resolve each end with `resolveTarget` (symlinks are handled as links,
   never followed), refuse the root, require the destination folder to exist (404), refuse
@@ -119,12 +131,53 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   rejected, and the trash folder itself or an entry already inside it returns
   `ErrInTrash` (400, same trailing-slash comparison as move-into-self so `/.trash-old` is
   fine). `/.trash` starts with a dot, so listings hide it unless "Show hidden files" is
-  on; restoring is a normal Move out of it. In the UI the context menu's "Move to trash"
-  (files and folders, right before Delete, `trash` icon in `MENU_ICONS`, not danger) calls
-  `trashEntry()`: no confirmation (it is reversible), `rekeyFolderPaths()` to the returned
-  path so pins/favorites/tags/notes/hidden marks/recents follow like any move, then
-  refresh + status. There is no empty-trash or restore UI (yet); delete inside `.trash` is
-  the permanent one.
+  on. In the UI the context menu's "Move to trash" (files and folders, right before
+  Delete, `trash` icon in `MENU_ICONS`, not danger) calls `trashEntry()`: no confirmation
+  (it is reversible), `rekeyFolderPaths()` to the returned path so
+  pins/favorites/tags/notes/hidden marks/recents follow like any move, then refresh +
+  status. Delete inside `.trash` is the permanent one; see the trash-view bullet below
+  for restore/empty.
+- `POST /api/trash/empty` calls `files.EmptyTrash()`: it removes every entry inside
+  `/.trash` (like `Delete` recursive — symlinks are unlinked, not followed), leaves the
+  folder itself in place, treats a missing `/.trash` as "nothing to remove" (0), and
+  returns `{"removed": n}`. There is no per-item soft delete — emptying is irreversible,
+  which is why the UI confirms via `confirmDialog()` first.
+- The trash view (`showTrashView()`, reachable from Settings and from the empty-space
+  context menu's "Open trash") shows `/.trash` as a virtual folder: it fetches
+  `/api/list?path=/.trash&hidden=1` (forced, so a trashed dotfile stays visible),
+  renders `Home › Trash` via `renderTrashBreadcrumbs()`, and shows the danger
+  `#empty-trash` toolbar button (hidden elsewhere, disabled while the listing is empty).
+  Entries inside the trash (any `isInTrash(path)` hit except `/.trash` itself) get a
+  reduced context menu: Open/Preview, **Restore…**, Download (files), Properties, Delete —
+  no rename/move/copy/tag/notes/hide. "Restore…" opens the picker in a third mode
+  (`openPicker(entry, "restore")`, OK label "Restore here", disabled at `/.trash`) and
+  confirms with `/api/move` + `rekeyFolderPaths()`; a destination name that is already
+  taken is renamed trash-style by `uniqueRestoreName()` ("a.txt" → "a 2.txt") instead of
+  failing, shown in the picker hint. The original location is **not** recorded anywhere,
+  so restore means picking a folder, not one click back to where it was.
+- Search: `GET /api/search?q=report&path=/docs&hidden=0` calls `files.Search(rootRel,
+  query, showHidden)` — a root-confined `filepath.WalkDir` that matches names
+  case-insensitively by substring, walks from `path` (default `/`), applies the same dot
+  filter as `/api/list` (a dot folder's whole subtree is skipped unless `hidden=1`), never
+  follows directory symlinks, caps results at `files.MaxSearchResults` (200, collected in
+  walk order before the dirs-first sort) and reports `"truncated": true` at the cap. An
+  empty/whitespace `q` is a 400 before it reaches the FS. `files.Search` also rejects an
+  empty query with `ErrInvalidName`, and the walk root itself is never a match. The UI:
+  the toolbar's `#search-toggle` text button swaps the filter input for `#search-input`
+  (`toggleSearch()`; Enter runs, Escape clears or closes); `runSearch(query)` shows the
+  matches as a virtual folder with `Home › Search: "q"` breadcrumbs, searching from the
+  root with the `showHidden` setting. Re-running (Enter or a mutation's
+  `refreshCurrentView()`) does not grow `navHistory`; the tag-view staleness rules apply.
+- The three virtual views (tag, trash, search) share machinery: `enterVirtualView()`
+  resets the filter, leaves any other virtual view, disables upload
+  (`setUploadDisabled()`), hides `#empty-trash`, closes the search bar (`closeSearchBar()`)
+  and bumps the shared `viewSeq` (replacing the old per-view `tagViewSeq`), which drops
+  stale responses. `refreshCurrentView()` re-runs whichever view is active after a
+  mutation; `navigate()` clears all three, re-enables upload and restores the filter
+  placeholder; `pinnedEntries()`/`excludePinned()` opt every virtual view out of the
+  Pinned section; `globalMenuItems()` omits New folder / New file / Upload in all of them
+  and offers "Open trash" everywhere except the trash view itself; `emptyText()` has a
+  message per view; `showViewMenu()` titles the menu after the view.
 - Navigation is in-page only: `navigate()` never calls `history.pushState`, so the browser
   Back button leaves the app. The in-app `#nav-back` arrow uses its own `navHistory` stack
   (capped at 50): it returns to the previous folder, falls back to the parent when the
@@ -163,16 +216,15 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   boot; the rekey/forget helpers keep `folderColors` in step with renames and deletes.
   Only palette-valid colours are listed, so tampered storage entries are ignored, and the
   empty state is two `disabled` hints.
-- `showTagView(color)` makes a tag a virtual folder: it sets `tagView`, pushes the current
-  folder onto `navHistory` (unless `recordHistory: false`), renders `Home › ● Red` via
-  `renderTagBreadcrumbs()`, disables `#upload-toggle` through `setTagViewUpload(true)`,
-  fetches `/api/metadata` for every tagged path and silently drops paths that 404 from
+- `showTagView(color)` makes a tag a virtual folder: it sets `tagView`, then
+  `enterVirtualView()` pushes the current folder onto `navHistory` (unless
+  `recordHistory: false`), and `renderTagBreadcrumbs()` renders `Home › ● Red`
+  (on the shared `startVirtualCrumbs()`/`finishCrumbs()` helpers). It fetches
+  `/api/metadata` for every tagged path and silently drops paths that 404 from
   `folderColors` (saving and updating the header); any other failure keeps the tag and
   only leaves that entry out, with a status line explaining it. Entries go through the normal
   `renderEntries()`, so sorting, filtering, columns, grid size and the entry context menu
-  all work; `pinnedEntries()` returns nothing and `excludePinned()` passes entries through
-  (a tag view has no Pinned section), and `globalMenuItems()` omits New folder / New file /
-  Upload there. `tagViewSeq` drops a slow metadata batch when a newer view opened.
+  all work; the virtual-view bullet below covers the pinned/menu/empty-state opt-outs.
   `navigate()` clears `tagView` (and re-enables upload), while `refreshCurrentView()`
   re-runs `showTagView(tagView, {recordHistory: false})` after rename/delete/move/copy so
   mutations stay in the view; `setFolderColor()` does the same, `clearTags()` returns to
@@ -197,9 +249,10 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - Settings: the ⚙ header button (`#settings-toggle`, `showSettingsMenu()`) opens
   `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, the
   `themeMenuItems()` pair ("Light theme" / "Dark theme", the only theme switch), then
-  `viewMenuItems()` (List/Grid), a "Server info" entry (so ℹ️ can be hidden on tiny
-  screens), and Clear tags / Clear favorites / Clear recent / Clear hidden / Clear notes
-  with counts (disabled at 0). The theme persists in the `theme` localStorage key and the
+  `viewMenuItems()` (List/Grid), an "Open trash" entry, a "Server info" entry (so ℹ️ can
+  be hidden on tiny screens), and Clear tags / Clear favorites / Clear recent / Clear
+  hidden / Clear notes with counts (disabled at 0). The theme persists in the `theme`
+  localStorage key and the
   inline script in `index.html` applies it before first paint; `applyTheme()` only sets
   the attribute and storage now (there is no header button). Dot entries are hidden by default:
   `showHidden` lives in localStorage, `navigate()` adds `&hidden=1` to `/api/list` when it

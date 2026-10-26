@@ -46,6 +46,7 @@ func New(cfg *config.Config, fm *files.FS, web fs.FS, logger *log.Logger) *Serve
 func (s *Server) Handler() http.Handler {
 	app := http.NewServeMux()
 	app.HandleFunc("GET /api/list", s.handleList)
+	app.HandleFunc("GET /api/search", s.handleSearch)
 	// /api/stat is kept as an alias for scripts; the UI uses /api/metadata
 	// because ad blockers match the generic filter rule "/api/stat?" and would
 	// otherwise make the browser reject the request ("Failed to fetch").
@@ -60,6 +61,7 @@ func (s *Server) Handler() http.Handler {
 	app.HandleFunc("POST /api/move", s.handleMove)
 	app.HandleFunc("POST /api/copy", s.handleCopy)
 	app.HandleFunc("POST /api/trash", s.handleTrash)
+	app.HandleFunc("POST /api/trash/empty", s.handleTrashEmpty)
 	app.HandleFunc("POST /api/create", s.handleCreate)
 	app.HandleFunc("PUT /api/write", s.handleWrite)
 	app.HandleFunc("POST /api/upload", s.handleUpload)
@@ -144,6 +146,25 @@ func (s *Server) handleList(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "search query is empty"})
+		return
+	}
+	showHidden := r.URL.Query().Get("hidden") == "1"
+	rel, entries, err := s.fm.Search(r.URL.Query().Get("path"), query, showHidden)
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"path":      rel,
+		"entries":   entries,
+		"truncated": len(entries) >= files.MaxSearchResults,
+	})
+}
+
 func (s *Server) handleStat(w http.ResponseWriter, r *http.Request) {
 	entry, err := s.fm.Stat(r.URL.Query().Get("path"))
 	if err != nil {
@@ -166,6 +187,34 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// mediaTypes maps file extensions to the Content-Type served by /api/download
+// so the browser can preview images, video, audio and PDFs inline. Anything
+// unmapped keeps application/octet-stream; browsers sniff <img> and <video>
+// sources by content, but <embed> needs the real type.
+var mediaTypes = map[string]string{
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".png":  "image/png",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+	".svg":  "image/svg+xml",
+	".bmp":  "image/bmp",
+	".avif": "image/avif",
+	".ico":  "image/x-icon",
+	".mp4":  "video/mp4",
+	".webm": "video/webm",
+	".mov":  "video/quicktime",
+	".m4v":  "video/x-m4v",
+	".mp3":  "audio/mpeg",
+	".wav":  "audio/wav",
+	".ogg":  "audio/ogg",
+	".oga":  "audio/ogg",
+	".m4a":  "audio/mp4",
+	".flac": "audio/flac",
+	".aac":  "audio/aac",
+	".pdf":  "application/pdf",
+}
+
 func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	file, info, err := s.fm.Open(r.URL.Query().Get("path"))
 	if err != nil {
@@ -175,7 +224,11 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	defer file.Close()
 
 	name := strings.ReplaceAll(info.Name(), `"`, "")
-	w.Header().Set("Content-Type", "application/octet-stream")
+	contentType := "application/octet-stream"
+	if mt, ok := mediaTypes[strings.ToLower(filepath.Ext(info.Name()))]; ok {
+		contentType = mt
+	}
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
@@ -254,6 +307,15 @@ func (s *Server) handleTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"trashed": rel, "path": to})
+}
+
+func (s *Server) handleTrashEmpty(w http.ResponseWriter, r *http.Request) {
+	removed, err := s.fm.EmptyTrash()
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"removed": removed})
 }
 
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {

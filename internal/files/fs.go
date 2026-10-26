@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -43,6 +44,10 @@ const MaxUploadSize = 50 << 20 // 50 MiB
 
 // MaxWriteSize is the largest body accepted when saving an edited file.
 const MaxWriteSize = 8 << 20 // 8 MiB
+
+// MaxSearchResults caps how many entries Search returns; the API reports a
+// truncation when the result length reaches it.
+const MaxSearchResults = 200
 
 // TrashDir is the name of the trash folder at the root. It starts with a dot,
 // so listings hide it unless hidden entries are requested.
@@ -573,4 +578,88 @@ func uniqueTrashedName(dir, name string) string {
 			return candidate
 		}
 	}
+}
+
+// EmptyTrash permanently removes every entry inside the trash folder, leaving
+// the folder itself in place. Entries are removed like Delete removes them:
+// symlinks are unlinked rather than followed. A missing trash folder is not an
+// error — there is simply nothing to remove. It returns how many entries were
+// removed.
+func (f *FS) EmptyTrash() (int, error) {
+	trashFull := filepath.Join(f.root, TrashDir)
+	entries, err := os.ReadDir(trashFull)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	removed := 0
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(trashFull, entry.Name())); err != nil {
+			return removed, err
+		}
+		removed++
+	}
+	return removed, nil
+}
+
+// Search walks the folder at rootRel recursively and returns entries whose
+// name contains query, case-insensitively. The result is ordered like List
+// (directories first, then case-insensitively by name) and capped at
+// MaxSearchResults entries, collected in walk order before sorting. Dot
+// entries — and the whole subtree beneath a dot folder such as the trash —
+// are skipped unless showHidden is set. Directory symlinks are never
+// followed, so a link cannot pull the search outside the root. The query must
+// not be empty (ErrInvalidName); the root itself is never a match.
+func (f *FS) Search(rootRel, query string, showHidden bool) (string, []Entry, error) {
+	needle := strings.ToLower(strings.TrimSpace(query))
+	if needle == "" {
+		return "", nil, ErrInvalidName
+	}
+	full, err := f.resolve(rootRel)
+	if err != nil {
+		return "", nil, err
+	}
+	entries := []Entry{}
+	err = filepath.WalkDir(full, func(p string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			if p == full {
+				return walkErr // the searched folder itself is unreadable
+			}
+			return nil // skip unreadable subtrees like List skips dead entries
+		}
+		if p == full {
+			return nil
+		}
+		name := d.Name()
+		if !showHidden && strings.HasPrefix(name, ".") {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.Contains(strings.ToLower(name), needle) {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return nil // broken symlink or an entry that just vanished
+		}
+		entries = append(entries, f.entry(name, f.relOf(p), info))
+		if len(entries) >= MaxSearchResults {
+			return filepath.SkipAll
+		}
+		return nil
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].IsDir != entries[j].IsDir {
+			return entries[i].IsDir
+		}
+		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+	})
+	return f.relOf(full), entries, nil
 }

@@ -102,6 +102,24 @@
         autocomplete="off"
         aria-label="Filter files in this folder"
       >
+      <button
+        id="search-toggle"
+        class="btn"
+        type="button"
+        aria-expanded="false"
+        aria-controls="search-input"
+        title="Search files by name"
+      >Search</button>
+      <input
+        id="search-input"
+        class="filter-input"
+        type="search"
+        placeholder="Search everywhere… press Enter"
+        autocomplete="off"
+        aria-label="Search files by name"
+        hidden
+      >
+      <button id="empty-trash" class="btn danger" type="button" hidden>Empty trash</button>
       <span class="item-count" id="item-count" aria-live="polite"></span>
       <button
         id="columns-toggle"
@@ -141,6 +159,7 @@
         </div>
       </div>
       <pre class="viewer-body" id="viewer-body"></pre>
+      <div class="viewer-media" id="viewer-media" hidden></div>
       <textarea id="viewer-editor" class="viewer-editor" spellcheck="false" hidden></textarea>
     </div>
   </div>
