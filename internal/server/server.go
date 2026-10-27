@@ -87,6 +87,7 @@ func (s *Server) Handler() http.Handler {
 	app.HandleFunc("POST /api/trash", s.handleTrash)
 	app.HandleFunc("POST /api/trash/empty", s.handleTrashEmpty)
 	app.HandleFunc("POST /api/create", s.handleCreate)
+	app.HandleFunc("POST /api/extract", s.handleExtract)
 	app.HandleFunc("PUT /api/write", s.handleWrite)
 	app.HandleFunc("POST /api/upload", s.handleUpload)
 	app.HandleFunc("POST /api/share", s.handleShareCreate)
@@ -412,6 +413,15 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"created": rel})
 }
 
+func (s *Server) handleExtract(w http.ResponseWriter, r *http.Request) {
+	dest, err := s.fm.Extract(r.URL.Query().Get("path"))
+	if err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"extracted": dest})
+}
+
 func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {
 	rel := r.URL.Query().Get("path")
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, files.MaxWriteSize))
@@ -455,8 +465,15 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	uploaded := []string{}
 	failed := []map[string]string{}
-	for _, part := range parts {
-		name := filepath.Base(part.Filename)
+	// Folder uploads send one "path" field per file, aligned by order: Go's
+	// multipart parser strips directories from part filenames, so the
+	// relative path has to travel separately.
+	paths := r.MultipartForm.Value["path"]
+	for i, part := range parts {
+		name := part.Filename
+		if i < len(paths) && paths[i] != "" {
+			name = paths[i]
+		}
 		src, err := part.Open()
 		if err != nil {
 			failed = append(failed, map[string]string{"name": name, "error": err.Error()})
@@ -485,6 +502,8 @@ func (s *Server) writeError(w http.ResponseWriter, err error) {
 		errors.Is(err, files.ErrMoveIntoSelf), errors.Is(err, files.ErrCopyIntoSelf),
 		errors.Is(err, files.ErrUnsupported), errors.Is(err, files.ErrInTrash):
 		status = http.StatusBadRequest
+	case errors.Is(err, files.ErrArchiveTooLarge):
+		status = http.StatusRequestEntityTooLarge
 	case errors.Is(err, files.ErrDirNotEmpty), errors.Is(err, os.ErrExist):
 		status = http.StatusConflict
 	}

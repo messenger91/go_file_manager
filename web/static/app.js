@@ -20,6 +20,7 @@
     viewerCancel: document.getElementById("viewer-cancel"),
     viewerEditor: document.getElementById("viewer-editor"),
     fileInput: document.getElementById("file-input"),
+    folderInput: document.getElementById("folder-input"),
     contextMenu: document.getElementById("context-menu"),
     confirmModal: document.getElementById("confirm-modal"),
     confirmTitle: document.getElementById("confirm-title"),
@@ -76,6 +77,9 @@
     destinationOk: document.getElementById("destination-ok"),
     destinationCancel: document.getElementById("destination-cancel"),
     noteModal: document.getElementById("note-modal"),
+    shortcutsModal: document.getElementById("shortcuts-modal"),
+    shortcutsList: document.getElementById("shortcuts-list"),
+    shortcutsClose: document.getElementById("shortcuts-close"),
     noteName: document.getElementById("note-name"),
     noteText: document.getElementById("note-text"),
     noteSave: document.getElementById("note-save"),
@@ -546,6 +550,168 @@
     loadPickerFolders();
   }
 
+  // --- keyboard navigation ---
+  // A cursor (distinct from the selection) marks the entry the keyboard acts
+  // on: ↑/↓ move it, Enter opens, F2 renames, Delete trashes, Backspace goes
+  // back. It is an in-memory overlay like the selection and is dropped with
+  // the listing.
+  let cursorPath = null;
+
+  // The entries the cursor can reach, in the order they are rendered (the
+  // Pinned shortcuts section is skipped — those are one-click shortcuts).
+  function navigableEntries() {
+    return excludePinned(visibleEntries());
+  }
+
+  function cursorEntry() {
+    return (
+      navigableEntries().find(function (e) {
+        return e.path === cursorPath;
+      }) || null
+    );
+  }
+
+  // Rows and cards carry data-path; attribute selectors would need escaping,
+  // so this scans the short lists instead.
+  function elementForPath(path) {
+    const rows = els.body.querySelectorAll("tr[data-path]");
+    for (let i = 0; i < rows.length; i++) {
+      if (rows[i].dataset.path === path) return rows[i];
+    }
+    const cards = els.grid.querySelectorAll(".card[data-path]");
+    for (let j = 0; j < cards.length; j++) {
+      if (cards[j].dataset.path === path) return cards[j];
+    }
+    return null;
+  }
+
+  function setCursor(entry) {
+    const previous = cursorPath;
+    cursorPath = entry ? entry.path : null;
+    const previousEl = previous ? elementForPath(previous) : null;
+    if (previousEl) previousEl.classList.remove("cursor");
+    const el = cursorPath ? elementForPath(cursorPath) : null;
+    if (el) {
+      el.classList.add("cursor");
+      el.scrollIntoView({ block: "nearest" });
+    }
+  }
+
+  function moveCursor(delta, extendSelection) {
+    const entries = navigableEntries();
+    if (entries.length === 0) return;
+    let index = entries.findIndex(function (e) {
+      return e.path === cursorPath;
+    });
+    if (index === -1) {
+      // No cursor yet: ↓ starts at the top, ↑ at the bottom.
+      index = delta > 0 ? -1 : entries.length;
+    }
+    const next = entries[Math.max(0, Math.min(entries.length - 1, index + delta))];
+    setCursor(next);
+    if (extendSelection && next) {
+      selectedPaths[next.path] = true;
+      renderList();
+      updateBatchBar();
+    }
+  }
+
+  // True while a menu, dialog or the viewer covers the listing.
+  function anyPanelOpen() {
+    return (
+      !els.contextMenu.hidden ||
+      !els.confirmModal.hidden ||
+      !els.promptModal.hidden ||
+      !els.uploadModal.hidden ||
+      !els.infoModal.hidden ||
+      !els.propertiesModal.hidden ||
+      !els.destinationModal.hidden ||
+      !els.noteModal.hidden ||
+      !els.viewer.hidden ||
+      !els.columnsMenu.hidden
+    );
+  }
+
+  // Consumes the navigation keys; returns false when the key is not one (or
+  // the current view has nothing to navigate).
+  function handleNavigationKey(e) {
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        moveCursor(1, e.shiftKey);
+        return true;
+      case "ArrowUp":
+        e.preventDefault();
+        moveCursor(-1, e.shiftKey);
+        return true;
+      case "Enter": {
+        // A focused card opens itself through its own keydown handler.
+        if (e.target && e.target.closest && e.target.closest(".card")) return false;
+        const entry = cursorEntry();
+        if (!entry) return false;
+        e.preventDefault();
+        if (entry.isDir) navigate(entry.path);
+        else openFile(entry);
+        return true;
+      }
+      case "F2": {
+        const entry = cursorEntry();
+        if (!entry) return false;
+        e.preventDefault();
+        renameEntry(entry);
+        return true;
+      }
+      case "Delete": {
+        const entry = cursorEntry();
+        if (!entry) return false;
+        e.preventDefault();
+        trashEntry(entry);
+        return true;
+      }
+      case "Backspace":
+        e.preventDefault();
+        goBack();
+        return true;
+      case "?":
+        e.preventDefault();
+        openShortcuts();
+        return true;
+    }
+    return false;
+  }
+
+  // The shortcut sheet (also reachable from the Settings menu).
+  const SHORTCUTS = [
+    ["↑ / ↓", "Move the cursor through the listing"],
+    ["Shift + ↑ / ↓", "Move the cursor and extend the selection"],
+    ["Enter", "Open the entry under the cursor"],
+    ["F2", "Rename the entry under the cursor"],
+    ["Delete", "Move the entry under the cursor to the trash"],
+    ["Backspace", "Go back to the previous folder"],
+    ["Ctrl/⌘ + A", "Select every visible entry"],
+    ["Ctrl/⌘ + S", "Save the file being edited"],
+    ["Escape", "Close menus and dialogs, clear the selection"],
+    ["?", "Show this list"],
+  ];
+
+  function openShortcuts() {
+    els.shortcutsList.textContent = "";
+    SHORTCUTS.forEach(function (pair) {
+      const dt = document.createElement("dt");
+      dt.textContent = pair[0];
+      const dd = document.createElement("dd");
+      dd.textContent = pair[1];
+      els.shortcutsList.appendChild(dt);
+      els.shortcutsList.appendChild(dd);
+    });
+    els.shortcutsModal.hidden = false;
+    els.shortcutsClose.focus();
+  }
+
+  function closeShortcuts() {
+    els.shortcutsModal.hidden = true;
+  }
+
   // Dot entries are hidden by default; the settings menu toggles them.
   let showHidden = loadStored("showHidden", false) === true;
 
@@ -951,6 +1117,7 @@
     selectMode = false;
     els.selectToggle.setAttribute("aria-pressed", "false");
     lastSelectedPath = null;
+    cursorPath = null;
     updateBatchBar();
     setStatus("");
     closeViewer();
@@ -1254,6 +1421,11 @@
     items.push.apply(items, viewMenuItems());
     items.push({ separator: true });
     items.push({ label: "Open trash", icon: "trash", action: function () { showTrashView(); } });
+    items.push({
+      label: "Keyboard shortcuts",
+      icon: "keyboard",
+      action: function () { openShortcuts(); },
+    });
     items.push({ label: "Server info", icon: "info", action: function () { openInfo(); } });
     items.push({ separator: true });
     items.push(
@@ -1741,6 +1913,10 @@
   function apiShareCreate(path, ttl) {
     const extra = ttl ? "&ttl=" + encodeURIComponent(ttl) : "";
     return sendJSON("POST", "/api/share?path=" + encodeURIComponent(path) + extra);
+  }
+
+  function apiExtract(path) {
+    return sendJSON("POST", "/api/extract?path=" + encodeURIComponent(path));
   }
 
   function apiShareRevoke(token) {
@@ -2251,6 +2427,7 @@
     });
 
     if (isSelected(entry.path)) tr.classList.add("selected");
+    if (entry.path === cursorPath) tr.classList.add("cursor");
     tr.addEventListener("click", function (e) {
       handleEntryClick(e, entry);
     });
@@ -2602,6 +2779,7 @@
     }
     card.appendChild(actions);
     if (isSelected(entry.path)) card.classList.add("selected");
+    if (entry.path === cursorPath) card.classList.add("cursor");
     card.dataset.path = entry.path;
 
     card.addEventListener("click", function (e) {
@@ -2660,12 +2838,13 @@
       els.filter.setAttribute("aria-label", "Filter files in this folder");
     }
     // The selection belongs to the listing just left; batch paths from another
-    // folder would be wrong to act on.
+    // folder would be wrong to act on. Same for the keyboard cursor.
     if (selectionCount() > 0 || selectMode) {
       selectedPaths = {};
       selectMode = false;
       els.selectToggle.setAttribute("aria-pressed", "false");
     }
+    cursorPath = null;
     updateBatchBar();
     setStatus("");
     closeViewer();
@@ -3279,12 +3458,17 @@
     els.uploadModal.hidden = true;
   }
 
-  function uploadFiles(fileList) {
-    const files = Array.prototype.slice.call(fileList || []);
+  // Uploads one request worth of files into the current folder. Each item is
+  // {file, path} where path is the name, or a relative path with subfolders
+  // for folder uploads; the server creates the intermediate folders.
+  function uploadFiles(items) {
+    const files = (items || []).map(function (item) {
+      return item instanceof File ? { file: item, path: item.name } : item;
+    });
     if (files.length === 0) return;
 
-    const total = files.reduce(function (sum, file) {
-      return sum + file.size;
+    const total = files.reduce(function (sum, item) {
+      return sum + item.file.size;
     }, 0);
     if (total > MAX_UPLOAD_SIZE) {
       setStatus(
@@ -3296,15 +3480,19 @@
         true
       );
       els.fileInput.value = "";
+      els.folderInput.value = "";
       return;
     }
 
     const form = new FormData();
-    files.forEach(function (file) {
-      form.append("file", file, file.name);
+    files.forEach(function (item) {
+      // Go's multipart parser strips directories from the filename, so the
+      // relative path travels in its own field, aligned by order.
+      form.append("path", item.path);
+      form.append("file", item.file, item.path);
     });
 
-    openUploadModal(files);
+    openUploadModal(files.map(function (item) { return item.file; }));
 
     // fetch() cannot report upload progress, so the upload uses XHR.
     const xhr = new XMLHttpRequest();
@@ -3336,6 +3524,7 @@
       els.uploadStatus.classList.add("error");
       finishUpload();
       els.fileInput.value = "";
+      els.folderInput.value = "";
       setStatus("Upload cancelled.", true);
     });
 
@@ -3351,6 +3540,7 @@
       if (xhr.status === 401) {
         finishUpload();
         els.fileInput.value = "";
+        els.folderInput.value = "";
         redirectToLogin();
         return;
       }
@@ -3364,6 +3554,7 @@
       els.uploadProgressFill.classList.add("done");
       finishUpload();
       els.fileInput.value = "";
+      els.folderInput.value = "";
 
       let message = "";
       let isError = false;
@@ -3400,6 +3591,7 @@
     els.uploadStatus.classList.add("error");
     finishUpload();
     els.fileInput.value = "";
+    els.folderInput.value = "";
     setStatus(message, true);
   }
 
@@ -3457,8 +3649,78 @@
       setStatus("Uploads are not available in this view.", true);
       return;
     }
-    if (e.dataTransfer.files.length > 0) uploadFiles(e.dataTransfer.files);
+    collectDroppedEntries(e.dataTransfer).then(uploadFiles);
   });
+
+  // Turns a drop into {file, path} items. Plain file drops are the FileList;
+  // a dropped folder (or a mix) is walked through webkitGetAsEntry, so the
+  // server can recreate the tree under the current folder.
+  function collectDroppedEntries(dataTransfer) {
+    const plain = Array.prototype.map.call(dataTransfer.files || [], function (file) {
+      return { file: file, path: file.name };
+    });
+    const items = dataTransfer.items ? Array.prototype.slice.call(dataTransfer.items) : [];
+    const entries = items
+      .map(function (item) {
+        return item.webkitGetAsEntry ? item.webkitGetAsEntry() : null;
+      })
+      .filter(Boolean);
+    // Directories only appear as entries; if there are none, the FileList
+    // already covers everything.
+    const hasDir = entries.some(function (entry) {
+      return entry.isDirectory;
+    });
+    if (!hasDir) {
+      return Promise.resolve(plain);
+    }
+    const out = [];
+    return Promise.all(
+      entries.map(function (entry) {
+        return walkDroppedEntry(entry, entry.name, out);
+      })
+    ).then(function () {
+      return out;
+    });
+  }
+
+  function walkDroppedEntry(entry, path, out) {
+    return new Promise(function (resolve) {
+      if (entry.isFile) {
+        entry.file(
+          function (file) {
+            out.push({ file: file, path: path });
+            resolve();
+          },
+          function () {
+            resolve(); // unreadable entry: skip it
+          }
+        );
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const readBatch = function () {
+          // readEntries returns at most 100 per call until it returns [].
+          reader.readEntries(function (batch) {
+            if (batch.length === 0) {
+              resolve();
+              return;
+            }
+            Promise.all(
+              batch.map(function (child) {
+                return walkDroppedEntry(child, path + "/" + child.name, out);
+              })
+            ).then(readBatch, function () {
+              resolve();
+            });
+          }, function () {
+            resolve();
+          });
+        };
+        readBatch();
+      } else {
+        resolve();
+      }
+    });
+  }
 
   // A drop that misses the listing (a modal, the top bar) must not make the
   // browser navigate to the dropped file.
@@ -3520,6 +3782,22 @@
     a.remove();
   }
 
+  // Unpacks a .zip into a new folder next to it. The server refuses
+  // zip-slip entries, symlink entries and archives declaring more than
+  // files.MaxExtractSize, and cleans up a partial extraction.
+  function extractEntry(entry) {
+    apiExtract(entry.path)
+      .then(function (data) {
+        closeViewer();
+        return refreshCurrentView().then(function () {
+          setStatus('Extracted "' + entry.name + '" to ' + data.extracted + ".", false);
+        });
+      })
+      .catch(function (err) {
+        setStatus("Failed to extract " + entry.name + ": " + err.message, true);
+      });
+  }
+
   // Creates a never-expiring share and copies the public URL. The clipboard
   // is only available in secure contexts, so failures fall back to showing
   // the link in the status line. Shares are listed and revoked in Settings.
@@ -3561,6 +3839,8 @@
     trash: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M12 10.5v4.5"/><path d="M9.9 12.9l2.1 2.1 2.1-2.1"/>',
     restore: '<path d="M4 9.5h9.5a5 5 0 1 1 0 10H9"/><path d="M8 5.5l-4 4 4 4"/>',
     link: '<path d="M10.5 13.5a4.5 4.5 0 0 0 6.4.4l2.6-2.6a4.5 4.5 0 0 0-6.4-6.4l-1.3 1.3"/><path d="M13.5 10.5a4.5 4.5 0 0 0-6.4-.4l-2.6 2.6a4.5 4.5 0 0 0 6.4 6.4l1.3-1.3"/>',
+    extract: '<path d="M21 8v10.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5V8"/><path d="M6.5 3h11"/><path d="M12 15.5V8"/><path d="M8.5 11L12 7.5l3.5 3.5"/>',
+    keyboard: '<rect x="3" y="6.5" width="18" height="11" rx="2"/><path d="M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M7.5 13.5h.01M11 13.5h.01M14.5 13.5h.01M9.5 16h5"/>',
     newFolder: '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>',
     newFile: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6M9 15h6"/>',
     upload: '<path d="M12 20V9"/><path d="M7 13.5l5-5 5 5"/><path d="M5 4h14"/>',
@@ -3723,6 +4003,7 @@
             { label: "New folder", icon: "newFolder", action: function () { createFolder(); } },
             { label: "New file", icon: "newFile", action: function () { createFile(); } },
             { label: "Upload files…", icon: "upload", action: function () { els.fileInput.click(); } },
+            { label: "Upload folder…", icon: "upload", action: function () { els.folderInput.click(); } },
             { separator: true },
           ];
     if (!trashView) {
@@ -3920,6 +4201,11 @@
       icon: "link",
       action: function () { shareEntry(entry); },
     };
+    const extractItem = {
+      label: "Extract here",
+      icon: "extract",
+      action: function () { extractEntry(entry); },
+    };
 
     let items;
     if (isInTrash(entry.path) && entry.path !== TRASH_PATH) {
@@ -3995,6 +4281,12 @@
     }
     items.push({ separator: true });
     items.push.apply(items, globalMenuItems());
+    // Zip archives gain an Extract action right after Download (files only;
+    // the trash keeps its reduced menu).
+    if (!entry.isDir && !isInTrash(entry.path) && /\.zip$/i.test(entry.name)) {
+      const at = items.findIndex(function (item) { return item.label === "Download"; });
+      items.splice(at + 1, 0, extractItem);
+    }
     buildMenu(x, y, items, entry.name);
     els.contextMenu.dataset.source = "entry";
   }
@@ -4179,6 +4471,15 @@
     uploadFiles(els.fileInput.files);
   });
 
+  // Directory picks carry webkitRelativePath ("docs/img/a.png"); the server
+  // creates the intermediate folders.
+  els.folderInput.addEventListener("change", function () {
+    const items = Array.prototype.map.call(els.folderInput.files, function (file) {
+      return { file: file, path: file.webkitRelativePath || file.name };
+    });
+    uploadFiles(items);
+  });
+
   // The header button is the upload path on touch devices, where the
   // right-click context menu is awkward or unavailable.
   els.uploadToggle.addEventListener("click", function () {
@@ -4233,6 +4534,11 @@
     if (e.target === els.noteModal) closeNote();
   });
 
+  els.shortcutsClose.addEventListener("click", closeShortcuts);
+  els.shortcutsModal.addEventListener("click", function (e) {
+    if (e.target === els.shortcutsModal) closeShortcuts();
+  });
+
   els.viewerClose.addEventListener("click", closeViewer);
   els.viewer.addEventListener("click", function (e) {
     if (e.target === els.viewer && !editing) closeViewer();
@@ -4253,6 +4559,8 @@
       closeNote();
     } else if (e.key === "Escape" && !els.destinationModal.hidden) {
       closePicker();
+    } else if (e.key === "Escape" && !els.shortcutsModal.hidden) {
+      closeShortcuts();
     } else if (e.key === "Escape" && !els.viewer.hidden) {
       if (editing) cancelEdit();
       else closeViewer();
@@ -4264,6 +4572,14 @@
     } else if ((e.ctrlKey || e.metaKey) && e.key === "s" && editing) {
       e.preventDefault();
       saveEdit();
+    } else if (
+      !e.ctrlKey &&
+      !e.metaKey &&
+      !e.altKey &&
+      !isTextInput(e.target) &&
+      !anyPanelOpen()
+    ) {
+      handleNavigationKey(e);
     }
   });
 

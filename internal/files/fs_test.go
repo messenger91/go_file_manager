@@ -3,12 +3,14 @@ package files
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -459,10 +461,52 @@ func TestUploadExistingFails(t *testing.T) {
 
 func TestUploadInvalidName(t *testing.T) {
 	f := New(t.TempDir())
-	for _, name := range []string{"", ".", "..", "a/b"} {
+	// Nested paths are allowed now; only empty and root-shaped names are not.
+	for _, name := range []string{"", ".", "..", "/"} {
 		if err := f.Upload("/", name, strings.NewReader("x")); !errors.Is(err, ErrInvalidName) {
 			t.Errorf("Upload(%q) error = %v, want ErrInvalidName", name, err)
 		}
+	}
+}
+
+func TestUploadNested(t *testing.T) {
+	root := t.TempDir()
+	f := New(root)
+
+	// Folder uploads pass a relative path; the intermediate folders are made.
+	if err := f.Upload("/", "docs/img/a.png", strings.NewReader("img")); err != nil {
+		t.Fatalf("nested upload: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "docs", "img", "a.png")); err != nil || string(data) != "img" {
+		t.Fatalf("nested upload = %q, %v", data, err)
+	}
+	// A second file into the same subtree must not recreate or fail.
+	if err := f.Upload("/", "docs/b.txt", strings.NewReader("b")); err != nil {
+		t.Fatalf("second nested upload: %v", err)
+	}
+
+	// Backslashes are normalised like Windows clients send them.
+	if err := f.Upload("/docs", "img\\c.png", strings.NewReader("c")); err != nil {
+		t.Fatalf("backslash upload: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "docs", "img", "c.png")); err != nil || string(data) != "c" {
+		t.Fatalf("backslash upload = %q, %v", data, err)
+	}
+
+	// Traversal is clamped into the destination directory, never outside.
+	if err := f.Upload("/docs", "../../evil.txt", strings.NewReader("evil")); err != nil {
+		t.Fatalf("clamped upload: %v", err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "docs", "evil.txt")); err != nil || string(data) != "evil" {
+		t.Fatalf("clamped upload = %q, %v", data, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "evil.txt")); !os.IsNotExist(err) {
+		t.Fatalf("upload escaped the destination dir: %v", err)
+	}
+
+	// An existing target is never overwritten, also deep in the tree.
+	if err := f.Upload("/", "docs/b.txt", strings.NewReader("overwrite")); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("existing nested target error = %v, want os.ErrExist", err)
 	}
 }
 
@@ -1336,5 +1380,179 @@ func TestZipMulti(t *testing.T) {
 		if got, ok := byName[name]; !ok || got != content {
 			t.Errorf("entry %q = %q (present: %v), want %q", name, got, ok, content)
 		}
+	}
+}
+
+// buildTestZip writes a zip archive with the given entries to path. A name
+// ending in "/" becomes a directory entry; "mode: name" syntax (used with a
+// *zip.FileHeader by the caller) is not needed here — symlinks are created by
+// the dedicated test below.
+func buildTestZip(t *testing.T, path string, entries map[string]string) {
+	t.Helper()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	names := make([]string, 0, len(entries))
+	for name := range entries {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		wr, err := w.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(wr, entries[name]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExtractStripsCommonRoot(t *testing.T) {
+	root := t.TempDir()
+	buildTestZip(t, filepath.Join(root, "docs.zip"), map[string]string{
+		"docs/":          "",
+		"docs/a.txt":     "alpha",
+		"docs/sub/":      "",
+		"docs/sub/b.txt": "beta",
+		"docs/empty/":    "",
+	})
+	f := New(root)
+
+	dest, err := f.Extract("/docs.zip")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if dest != "/docs" {
+		t.Fatalf("dest = %q, want /docs", dest)
+	}
+	// The archive's own root folder is stripped, so the files sit directly in
+	// the destination.
+	if data, err := os.ReadFile(filepath.Join(root, "docs", "a.txt")); err != nil || string(data) != "alpha" {
+		t.Fatalf("docs/a.txt = %q, %v", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "docs", "sub", "b.txt")); err != nil || string(data) != "beta" {
+		t.Fatalf("docs/sub/b.txt = %q, %v", data, err)
+	}
+	if info, err := os.Stat(filepath.Join(root, "docs", "empty")); err != nil || !info.IsDir() {
+		t.Fatalf("empty dir preserved: %v, %v", info, err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "docs", "docs")); !os.IsNotExist(err) {
+		t.Fatalf("double nesting appeared: %v", err)
+	}
+
+	// Extracting again refuses to overwrite the destination.
+	if _, err := f.Extract("/docs.zip"); !errors.Is(err, os.ErrExist) {
+		t.Fatalf("re-extract error = %v, want os.ErrExist", err)
+	}
+}
+
+func TestExtractWithoutCommonRoot(t *testing.T) {
+	root := t.TempDir()
+	buildTestZip(t, filepath.Join(root, "bundle.zip"), map[string]string{
+		"a.txt":     "flat",
+		"sub/b.txt": "nested",
+	})
+	f := New(root)
+
+	dest, err := f.Extract("/bundle.zip")
+	if err != nil {
+		t.Fatalf("extract: %v", err)
+	}
+	if dest != "/bundle" {
+		t.Fatalf("dest = %q, want /bundle", dest)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "bundle", "a.txt")); string(data) != "flat" {
+		t.Fatalf("bundle/a.txt = %q", data)
+	}
+	if data, _ := os.ReadFile(filepath.Join(root, "bundle", "sub", "b.txt")); string(data) != "nested" {
+		t.Fatalf("bundle/sub/b.txt = %q", data)
+	}
+}
+
+func TestExtractRejectsZipSlip(t *testing.T) {
+	root := t.TempDir()
+	buildTestZip(t, filepath.Join(root, "evil.zip"), map[string]string{
+		"good.txt":    "fine",
+		"../evil.txt": "escaped",
+	})
+	f := New(root)
+
+	if _, err := f.Extract("/evil.zip"); !errors.Is(err, ErrInvalidName) {
+		t.Fatalf("zip-slip error = %v, want ErrInvalidName", err)
+	}
+	// Nothing was written: no destination, no escaped file.
+	if _, err := os.Stat(filepath.Join(root, "evil")); !os.IsNotExist(err) {
+		t.Fatalf("destination exists after a refused extraction: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "evil.txt")); !os.IsNotExist(err) {
+		t.Fatal("the traversal entry landed outside the destination")
+	}
+}
+
+func TestExtractRejectsSymlinkEntry(t *testing.T) {
+	root := t.TempDir()
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	h := &zip.FileHeader{Name: "link", Method: zip.Store}
+	h.SetMode(os.ModeSymlink | 0o777)
+	wr, err := w.CreateHeader(h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.WriteString(wr, "/etc/passwd"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "links.zip"), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if _, err := f.Extract("/links.zip"); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("symlink entry error = %v, want ErrUnsupported", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "links")); !os.IsNotExist(err) {
+		t.Fatal("destination exists after a refused extraction")
+	}
+}
+
+func TestExtractSizeCap(t *testing.T) {
+	root := t.TempDir()
+	// A real zip with one empty stored file, whose declared uncompressed size
+	// is patched up past the cap (the writer would recompute it, so the
+	// central-directory record is patched directly).
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	if _, err := w.Create("big.bin"); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data := buf.Bytes()
+	sig := []byte("PK\x01\x02")
+	idx := bytes.Index(data, sig)
+	if idx == -1 {
+		t.Fatal("no central directory record found")
+	}
+	binary.LittleEndian.PutUint32(data[idx+24:], uint32(MaxExtractSize)+1)
+	if err := os.WriteFile(filepath.Join(root, "big.zip"), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	if _, err := f.Extract("/big.zip"); !errors.Is(err, ErrArchiveTooLarge) {
+		t.Fatalf("size cap error = %v, want ErrArchiveTooLarge", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "big")); !os.IsNotExist(err) {
+		t.Fatal("destination exists after a refused extraction")
 	}
 }

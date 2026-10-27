@@ -300,6 +300,16 @@
     </div>
   </div>
 
+  <div class="modal" id="shortcuts-modal" hidden>
+    <div class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+      <h2 class="modal-title" id="shortcuts-title">Keyboard shortcuts</h2>
+      <dl class="info-list" id="shortcuts-list"></dl>
+      <div class="modal-actions">
+        <button id="shortcuts-close" class="btn" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal" id="upload-modal" hidden>
     <div
       class="modal-panel"
@@ -328,6 +338,7 @@
   </div>
 
   <input id="file-input" type="file" multiple hidden>
+  <input id="folder-input" type="file" webkitdirectory multiple hidden>
 
   <script src="/static/app.js"></script>
 </body>

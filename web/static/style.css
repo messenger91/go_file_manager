@@ -1393,6 +1393,16 @@ tr.selected {
   outline-offset: -2px;
 }
 
+/* Keyboard cursor: the entry ↑/↓ currently points at. */
+tr.cursor {
+  background: var(--surface-2);
+}
+
+.card.cursor {
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+}
+
 .when-edit {
   display: none;
 }

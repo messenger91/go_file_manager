@@ -45,7 +45,8 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `.env` is read from the current working directory.
 - `internal/files` — root-confined filesystem access (`List`, `Search`, `Stat`, `ReadFile`,
   `Open`, `Delete`, `Mkdir`, `Rename`, `Move`, `Copy`, `Trash`, `EmptyTrash`, `Create`,
-  `Write`, `Upload`, `Zip`, `Disk`). This is the security boundary; test changes here.
+  `Write`, `Upload`, `Zip`, `ZipMulti`, `Extract`, `Disk`). This is the security boundary;
+  test changes here.
 - `internal/server` — HTTP routes, authentication (login form + sessions, PBKDF2 hash
   verification in `password.go`, login throttle, share links in `share.go`), JSON/error
   handling.
@@ -122,6 +123,16 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   403/404/400 cases ("not a folder" stays reserved for a single file). The UI's
   `downloadEntry()` dispatches by `isDir`, and folders carry a Download quick action in
   list, grid and context menu.
+- Extract archives: `POST /api/extract?path=/docs.zip` calls `files.Extract`, which
+  unpacks into a new folder next to the archive named after it (`/docs`) and refuses an
+  existing destination (409). When every entry lives under one top-level folder, that
+  wrapper is stripped (`stripCommonRoot`, so the app's own zip downloads extract without
+  double nesting). Safety, all validated before the first byte is written: zip-slip
+  entry names are rejected with `ErrInvalidName`, symlink entries with `ErrUnsupported`,
+  and the declared uncompressed total is capped at `files.MaxExtractSize` (1 GiB,
+  `ErrArchiveTooLarge` -> 413). A failed extraction removes the partial destination,
+  like `Copy`. The UI: the file context menu gains "Extract here" right after Download
+  for names ending in `.zip` (not in the trash's reduced menu), via `extractEntry()`.
 - Share links are self-service public URLs: the context menu's "Copy share link"
   (`shareEntry()`) posts `POST /api/share?path=…&ttl=…` (ttl optional — `7d`, `12h`,
   `30m` are parsed by `parseShareTTL`) and copies `location.origin + url` to the
@@ -145,13 +156,28 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   folder); Delete confirms once. Rows/cards get `.selected`; `navigate()` and
   `enterVirtualView()` clear the selection, so batch paths can never leak across
   listings — stale paths are skipped by `selectionEntries()`.
+- Keyboard navigation: a cursor (`cursorPath`, `.cursor` class — dashed outline on
+  cards, highlight on rows) marks the entry ↑/↓ act on; it skips the Pinned section
+  (`navigableEntries()` = `excludePinned(visibleEntries())`). Shift+↑/↓ extends the
+  selection, Enter opens, F2 renames, Delete trashes, Backspace calls `goBack()`, and
+  `?` opens the shortcuts sheet (`#shortcuts-modal`, also in Settings). The branch sits
+  at the END of the global keydown chain so modals win, is gated by
+  `anyPanelOpen()` + `isTextInput(e.target)`, and Enter yields to a focused card's own
+  handler. `navigate()`/`enterVirtualView()` drop the cursor with the listing.
 - Drag-and-drop upload: `dragenter`/`dragover`/`dragleave`/`drop` on `main` feed
-  `e.dataTransfer.files` into the existing `uploadFiles()` flow. `dragCarriesFiles()`
+  `e.dataTransfer.files` into the existing `uploadFiles()` flow, which takes
+  `{file, path}` items (a bare name, or a relative path with subfolders for folder
+  uploads). `dragCarriesFiles()`
   checks the `Files` type so internal drags (column reorder) are ignored;
   `uploadsAllowed()` mirrors the 📤 button's disabled state, so virtual views refuse
   drops too. `dragDepth` counts enter/leave pairs for the `.drag-over` highlight, and a
   document-level `drop` handler preventDefaults file drops outside the listing so the
-  browser never navigates to a dropped file.
+  browser never navigates to a dropped file. `collectDroppedEntries()` walks dropped
+  directories through `webkitGetAsEntry` (`readEntries` returns at most 100 per call,
+  hence the batch loop), so a dropped folder uploads as a tree; a mix of files and
+  folders is allowed. The context menu's "Upload folder…" (next to "Upload files…")
+  opens the `#folder-input` `webkitdirectory` picker, whose files carry
+  `webkitRelativePath`; the server creates intermediate folders.
 - Grid thumbnails: the Settings menu's "Show image thumbnails" toggle (`thumbnails`
   localStorage key, default off, `toggleThumbnails()` re-renders without a refetch)
   makes `gridCard()` render image files (same `previewKind()` lists as the viewer) as a
@@ -306,7 +332,7 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `settingsMenuItems()` in the shared menu: a `checked` "Show hidden files" toggle, a
   `checked` "Show image thumbnails" toggle (grid view only), the
   `themeMenuItems()` pair ("Light theme" / "Dark theme", the only theme switch), then
-  `viewMenuItems()` (List/Grid), an "Open trash" entry, a "Server info" entry (so ℹ️ can
+  `viewMenuItems()` (List/Grid), an "Open trash" entry, a "Keyboard shortcuts" entry (the `?` sheet), a "Server info" entry (so ℹ️ can
   be hidden on tiny screens), and Clear tags / Clear favorites / Clear recent / Clear
   hidden / Clear notes with counts (disabled at 0). The theme persists in the `theme`
   localStorage key and the

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -959,5 +960,142 @@ func TestShareEndpoints(t *testing.T) {
 	// A bad ttl is 400.
 	if rec := create("/docs", "never"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad ttl status = %d, want 400", rec.Code)
+	}
+}
+
+func TestExtractEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	// The folder must not share the archive's name: extracting docs.zip aims
+	// at /docs, so the source folder is called something else.
+	if err := os.Mkdir(filepath.Join(root, "archive-me"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "archive-me", "note.txt"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Build a real archive of the folder through the app's own zip code.
+	var buf bytes.Buffer
+	if err := s.fm.Zip("/archive-me", &buf); err != nil {
+		t.Fatal(err)
+	}
+	// The archive is stored under a different name than the source folder:
+	// extracting archive-me.zip aims at /archive-me, which exists — a real
+	// deployment's downloaded-then-uploaded archive lands somewhere fresh.
+	if err := os.WriteFile(filepath.Join(root, "bundle.zip"), buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	extract := func(path string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/extract?path="+url.QueryEscape(path), nil)
+		req.SetBasicAuth("admin", "secret")
+		return s.do(t, req)
+	}
+
+	rec := extract("/bundle.zip")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Extracted string `json:"extracted"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if body.Extracted != "/bundle" {
+		t.Fatalf("extracted = %q, want /bundle", body.Extracted)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "bundle", "note.txt")); err != nil || string(data) != "hello" {
+		t.Fatalf("extracted file = %q, %v", data, err)
+	}
+
+	// Extracting again refuses to overwrite (409), a missing archive is 404,
+	// a plain folder is 500-class "is a directory" — and auth is required.
+	if rec := extract("/bundle.zip"); rec.Code != http.StatusConflict {
+		t.Fatalf("re-extract status = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	if rec := extract("/missing.zip"); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing status = %d, want 404", rec.Code)
+	}
+	if rec := s.do(t, httptest.NewRequest("POST", "/api/extract?path=/bundle.zip", nil)); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", rec.Code)
+	}
+}
+
+func TestUploadEndpointNestedPaths(t *testing.T) {
+	s := newTestServer(t)
+
+	// Folder uploads send one "path" field per file, aligned by order; Go's
+	// multipart parser strips directories from the part filename itself.
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	for _, item := range []struct{ path, content string }{
+		{"docs/img/a.png", "a"},
+		{"docs/b.txt", "b"},
+	} {
+		if err := mw.WriteField("path", item.path); err != nil {
+			t.Fatal(err)
+		}
+		fw, err := mw.CreateFormFile("file", "whatever-the-client-sent")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(fw, item.content); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/upload?path=/", &buf)
+	req.Header.Set("Content-Type", mw.FormDataContentType())
+	req.SetBasicAuth("admin", "secret")
+	rec := s.do(t, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Uploaded []string `json:"uploaded"`
+		Failed   []any    `json:"failed"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if len(body.Uploaded) != 2 || len(body.Failed) != 0 {
+		t.Fatalf("uploaded = %v, failed = %v", body.Uploaded, body.Failed)
+	}
+	root := s.fm.Root()
+	if data, err := os.ReadFile(filepath.Join(root, "docs", "img", "a.png")); err != nil || string(data) != "a" {
+		t.Fatalf("docs/img/a.png = %q, %v", data, err)
+	}
+	if data, err := os.ReadFile(filepath.Join(root, "docs", "b.txt")); err != nil || string(data) != "b" {
+		t.Fatalf("docs/b.txt = %q, %v", data, err)
+	}
+
+	// A ".." path is clamped into the destination directory, never outside.
+	var buf2 bytes.Buffer
+	mw2 := multipart.NewWriter(&buf2)
+	if err := mw2.WriteField("path", "../../evil.txt"); err != nil {
+		t.Fatal(err)
+	}
+	fw2, err := mw2.CreateFormFile("file", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.WriteString(fw2, "evil")
+	mw2.Close()
+	req = httptest.NewRequest("POST", "/api/upload?path=/", &buf2)
+	req.Header.Set("Content-Type", mw2.FormDataContentType())
+	req.SetBasicAuth("admin", "secret")
+	if rec := s.do(t, req); rec.Code != http.StatusOK {
+		t.Fatalf("clamped upload status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(filepath.Join(root, "evil.txt")); err != nil {
+		t.Fatalf("clamped upload should land at the root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(root), "evil.txt")); !os.IsNotExist(err) {
+		t.Fatal("the upload escaped the root")
 	}
 }

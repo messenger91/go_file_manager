@@ -35,6 +35,9 @@ var (
 	// ErrInTrash is returned when trashing the trash folder itself or an entry
 	// that already lives inside it.
 	ErrInTrash = errors.New("path is already in the trash")
+	// ErrArchiveTooLarge is returned when an archive declares more
+	// uncompressed content than files.MaxExtractSize.
+	ErrArchiveTooLarge = errors.New("archive is too large to extract")
 )
 
 // MaxReadSize is the largest file the API will return as a text preview.
@@ -452,15 +455,34 @@ func (f *FS) Write(rel string, data []byte) error {
 	return os.WriteFile(full, data, 0o644)
 }
 
-// Upload streams src into a new file called name inside dirRel. It fails with
-// os.ErrExist if the target already exists and never overwrites.
-func (f *FS) Upload(dirRel, name string, src io.Reader) error {
-	if !validName(name) {
+// Upload streams src into a new file at dirRel/relPath, failing with
+// os.ErrExist if the target already exists and never overwriting. relPath is
+// usually a plain file name, but folder uploads pass a relative path such as
+// "docs/img/a.png"; intermediate folders are created. The path is cleaned
+// with the same clamping as every other path — ".." segments fold back into
+// dirRel, so an upload can never escape the root — and backslashes are
+// normalised to slashes first.
+func (f *FS) Upload(dirRel, relPath string, src io.Reader) error {
+	clean := path.Clean("/" + strings.ReplaceAll(relPath, "\\", "/"))
+	if clean == "/" {
 		return ErrInvalidName
 	}
-	full, err := f.resolveTarget(path.Join(dirRel, name))
+	dirFull, err := f.resolve(dirRel)
 	if err != nil {
 		return err
+	}
+
+	sub := filepath.FromSlash(strings.TrimPrefix(clean, "/"))
+	full := filepath.Join(dirFull, sub)
+	// The clamping above already keeps the target inside dirFull; the prefix
+	// check is belt and braces against future changes.
+	if full != dirFull && !strings.HasPrefix(full, dirFull+string(os.PathSeparator)) {
+		return ErrForbidden
+	}
+	if parent := filepath.Dir(full); parent != dirFull {
+		if err := os.MkdirAll(parent, 0o755); err != nil {
+			return err
+		}
 	}
 	file, err := os.OpenFile(full, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 	if err != nil {
@@ -732,6 +754,172 @@ func (f *FS) ZipMulti(rels []string, w io.Writer) error {
 		}
 	}
 	return zipw.Close()
+}
+
+// MaxExtractSize caps the total uncompressed size of one extraction.
+const MaxExtractSize = 1 << 30 // 1 GiB
+
+// Extract unpacks the zip archive at rel into a new folder next to it, named
+// after the archive ("docs.zip" -> "docs"). The destination must not exist,
+// and a failed extraction removes whatever was written so far. When every
+// entry lives under one common top-level folder, that wrapper is stripped, so
+// the archives this app's zip download produces extract without double
+// nesting. Safety rules: entry names are validated against path traversal
+// (zip-slip) outright, symlink entries are refused (a zip can declare a link
+// pointing anywhere), and the declared total size is capped at
+// MaxExtractSize before anything is written. Stored permission bits are
+// honoured, with owner read/write and directory access forced on.
+func (f *FS) Extract(rel string) (string, error) {
+	full, err := f.resolve(rel)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(full)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%s is a directory", rel)
+	}
+
+	base := filepath.Base(full)
+	destName := base
+	if strings.EqualFold(path.Ext(base), ".zip") {
+		destName = strings.TrimSuffix(base, path.Ext(base))
+	}
+	if !validName(destName) {
+		return "", ErrInvalidName
+	}
+	destFull := filepath.Join(filepath.Dir(full), destName)
+	if _, err := os.Lstat(destFull); err == nil {
+		return "", os.ErrExist
+	}
+
+	archive, err := os.Open(full)
+	if err != nil {
+		return "", err
+	}
+	defer archive.Close()
+	zr, err := zip.NewReader(archive, info.Size())
+	if err != nil {
+		return "", err
+	}
+
+	// Validate everything before touching the destination: one bad entry
+	// refuses the whole extraction.
+	var total int64
+	for _, zf := range zr.File {
+		clean := path.Clean(zf.Name)
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") || strings.HasPrefix(clean, "/") {
+			return "", ErrInvalidName
+		}
+		if zf.FileInfo().Mode()&os.ModeSymlink != 0 {
+			return "", ErrUnsupported
+		}
+		total += int64(zf.UncompressedSize64)
+		if total > MaxExtractSize {
+			return "", ErrArchiveTooLarge
+		}
+	}
+
+	names := make([]string, len(zr.File))
+	for i, zf := range zr.File {
+		names[i] = path.Clean(zf.Name)
+	}
+	if stripped, ok := stripCommonRoot(zr.File); ok {
+		names = stripped
+	}
+
+	if err := os.Mkdir(destFull, 0o755); err != nil {
+		return "", err
+	}
+	if err := extractEntries(zr, names, destFull); err != nil {
+		_ = os.RemoveAll(destFull)
+		return "", err
+	}
+	return f.relOf(destFull), nil
+}
+
+// stripCommonRoot maps entry names into a common top-level folder, if there is
+// one: every entry must either be that folder itself (a directory entry) or
+// live inside it. Otherwise ok is false and the caller keeps the plain names.
+func stripCommonRoot(entries []*zip.File) ([]string, bool) {
+	if len(entries) == 0 {
+		return nil, false
+	}
+	clean := path.Clean(entries[0].Name)
+	if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+		return nil, false
+	}
+	// The wrapper folder is the first entry's first segment — unless the first
+	// entry is the wrapper's own directory entry, whose name is the folder.
+	root, _, found := strings.Cut(clean, "/")
+	if !found {
+		if !entries[0].FileInfo().IsDir() {
+			return nil, false
+		}
+		root = clean
+	}
+	names := make([]string, len(entries))
+	for i, zf := range entries {
+		c := path.Clean(zf.Name)
+		if c == root {
+			if !zf.FileInfo().IsDir() {
+				return nil, false // a file where the wrapper folder should be
+			}
+			names[i] = "."
+			continue
+		}
+		rest, ok := strings.CutPrefix(c, root+"/")
+		if !ok || rest == "" {
+			return nil, false
+		}
+		names[i] = rest
+	}
+	return names, true
+}
+
+// extractEntries writes the (already validated) entries into dest. A name of
+// "." is the stripped wrapper folder itself and creates nothing.
+func extractEntries(zr *zip.Reader, names []string, dest string) error {
+	for i, zf := range zr.File {
+		if names[i] == "." {
+			continue
+		}
+		target := filepath.Join(dest, filepath.FromSlash(names[i]))
+		if target != dest && !strings.HasPrefix(target, dest+string(os.PathSeparator)) {
+			return ErrForbidden
+		}
+		if zf.FileInfo().IsDir() {
+			if err := os.MkdirAll(target, 0o755); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			return err
+		}
+		perm := zf.FileInfo().Mode().Perm() | 0o600
+		rc, err := zf.Open()
+		if err != nil {
+			return err
+		}
+		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, perm)
+		if err != nil {
+			rc.Close()
+			return err
+		}
+		_, err = io.Copy(out, rc)
+		closeErr := out.Close()
+		rc.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+	}
+	return nil
 }
 
 // uniqueArcname returns name, or name with " 2", " 3", … inserted before the

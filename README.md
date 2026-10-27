@@ -271,6 +271,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | POST   | `/api/create`   | Create an empty file                 |
 | PUT    | `/api/write`    | Overwrite a file (body is new content)|
 | POST   | `/api/upload`   | Upload one or more files (multipart) |
+| POST   | `/api/extract`  | Extract a `.zip` into a new folder   |
 
 `DELETE /api/delete?path=/sub` removes an empty folder (or a file). Deleting a
 non-empty folder returns `409 Conflict` unless `&recursive=true` is passed. The
@@ -347,8 +348,19 @@ results are sorted like a listing (folders first) and capped at 200
 `PUT /api/write?path=/sub/note.txt` replaces a file's contents with the raw
 request body (limit 8 MiB); the file must already exist. `POST /api/upload?path=/dir`
 accepts multipart form data with one or more `file` parts and never overwrites —
-each name that already exists is reported in the `failed` array. The whole upload is
-limited to 50 MiB; anything larger returns `413`.
+each name that already exists is reported in the `failed` array. A part's
+filename may include subfolders (`docs/img/a.png`) for folder uploads; the
+intermediate folders are created and `..` segments are clamped back into the
+destination directory. The whole upload is limited to 50 MiB; anything larger
+returns `413`.
+
+`POST /api/extract?path=/sub/docs.zip` unpacks the archive into a new folder
+next to it (`/sub/docs`), which must not exist (`409` otherwise); the response
+reports `{"extracted": path}`. When every entry lives under one top-level
+folder, that wrapper is stripped, so this app's own zip downloads extract
+without double nesting. Zip-slip entry names and symlink entries are refused
+outright, the declared uncompressed total is capped at 1 GiB (`413` above
+that), and a failed extraction removes whatever was written so far.
 
 `GET /api/metadata?path=/file.txt` returns the same fields as a listing entry. It is
 also served as `GET /api/stat` for compatibility, but the UI uses `/api/metadata`:
