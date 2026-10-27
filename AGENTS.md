@@ -46,8 +46,11 @@ in `internal/version/version.go` with every change — minor for a feature, patc
 - `internal/files` — root-confined filesystem access (`List`, `Search`, `Stat`, `ReadFile`,
   `Open`, `Delete`, `Mkdir`, `Rename`, `Move`, `Copy`, `Trash`, `EmptyTrash`, `Create`,
   `Write`, `Upload`, `Zip`, `Disk`). This is the security boundary; test changes here.
-- `internal/server` — HTTP routes, authentication (login form + sessions), JSON/error
+- `internal/server` — HTTP routes, authentication (login form + sessions, PBKDF2 hash
+  verification in `password.go`, login throttle, share links in `share.go`), JSON/error
   handling.
+- `cmd/hashpw` — prints a `PASSWORD_HASH` value for `.env`; thin wrapper over
+  `server.NewPasswordHash` (`go run ./cmd/hashpw 'password'`).
 - `internal/host` — host info for `GET /api/info` (hostname, OS name, arch, uptime, load
   average, memory). Read from `/proc` and `/etc/os-release`; unavailable values are left
   zero, so it compiles and runs on any OS.
@@ -63,13 +66,19 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   `admin`/`admin`; `PORT` defaults to `8080`. `PORT` is a **port only** — the listener is
   always `:PORT` (all interfaces); there is no host/bind setting, so restrict access with
   a firewall or reverse proxy. `README.md` has a systemd + nginx deployment guide.
-- Auth is a **login form with an in-memory session cookie** (`gfm_session`, 24h TTL), not
-  a browser Basic-auth prompt: the server never sends `WWW-Authenticate`, so the native
-  dialog can't appear. Unauthenticated `/api/*` calls get `401` JSON; page requests
-  redirect to `/login?next=…`. Only `/login`, `POST /logout`, and `/static/` are public.
-  HTTP Basic is still accepted on every route for scripts (`curl -u admin:admin`).
-  Sessions are not persisted, so a restart logs everyone out. `internal/server` holds the
-  auth tests; run them with `make test`.
+- Auth is a **login form with a session cookie** (`gfm_session`, 24h TTL), not a browser
+  Basic-auth prompt: the server never sends `WWW-Authenticate`, so the native dialog can't
+  appear. Unauthenticated `/api/*` calls get `401` JSON; page requests redirect to
+  `/login?next=…`. Only `/login`, `POST /logout`, `/static/`, and `GET /s/<token>` (share
+  links) are public. HTTP Basic is still accepted on every route for scripts
+  (`curl -u admin:admin`). `PASSWORD_HASH` (`pbkdf2-sha256$…`, from `cmd/hashpw`) replaces
+  the plaintext `PASSWORD` when set; a malformed hash **fails closed** (a `broken`
+  verifier refuses every password) rather than downgrading to the default admin/admin.
+  The login form throttles guessing: 5 failures per source host bounce further attempts
+  for a window that doubles up to 5 min (`loginThrottle`), answered exactly like a wrong
+  password. `SESSIONS_FILE` persists sessions as JSON (0600) across restarts; without it
+  they are memory-only and a restart logs everyone out. `internal/server` holds the auth
+  tests; run them with `make test`.
 - API path args are root-relative slash paths in `?path=/sub/file`. Traversal (`..`) is
   **clamped into the root** (yields 404 for nonexistent paths), not rejected; symlink
   escapes that resolve outside the root return 403. Keep both behaviors.
@@ -104,11 +113,38 @@ in `internal/version/version.go` with every change — minor for a feature, patc
   which also stops playback.
 - Folder download: `GET /api/download-zip?path=/docs` calls `files.Zip(rel, w)`, which
   streams `archive/zip` with the folder itself as the archive root (extracting does not
-  splatter files). Symlinks are stored as links (`os.Readlink` target as the entry body,
+  splatter files). Several `path=` arguments call `files.ZipMulti` instead: files land at
+  the archive root, folders as subtrees, name collisions get " 2" appended
+  (`uniqueArcname`), and the response is `selected.zip` — that is what the batch bar's
+  Download uses. Symlinks are stored as links (`os.Readlink` target as the entry body,
   `ModeSymlink`), unreadable subtrees and special files are skipped, and errors after the
-  first byte only get logged — the handler does an upfront `Stat` for the 403/404/400
-  cases ("not a folder"). The UI's `downloadEntry()` dispatches by `isDir`, and folders
-  carry a Download quick action in list, grid and context menu.
+  first byte only get logged — the handler does an upfront `Stat` of every path for the
+  403/404/400 cases ("not a folder" stays reserved for a single file). The UI's
+  `downloadEntry()` dispatches by `isDir`, and folders carry a Download quick action in
+  list, grid and context menu.
+- Share links are self-service public URLs: the context menu's "Copy share link"
+  (`shareEntry()`) posts `POST /api/share?path=…&ttl=…` (ttl optional — `7d`, `12h`,
+  `30m` are parsed by `parseShareTTL`) and copies `location.origin + url` to the
+  clipboard, falling back to showing it in the status line when the clipboard is
+  unavailable (non-secure contexts). `GET /s/<token>` is public and serves the entry:
+  mapped Content-Types inline, otherwise `attachment`, folders as zip. Tokens are 16
+  random bytes (hex) and are pure map keys — no path data in the URL. `GET /api/shares`
+  lists them; the Settings menu renders one revocable row per share
+  (`showSettingsMenu` is async and fetches them fresh; a failure just drops the rows).
+  Shares live in memory: a restart revokes everything, and a renamed/deleted entry
+  makes its link 404.
+- Multi-select: Ctrl/Cmd+click toggles, Shift+click ranges (anchored at
+  `lastSelectedPath`), Ctrl+A selects all visible (skipped inside inputs), and the
+  toolbar's Select button (`#select-toggle`, `aria-pressed`) enters Select mode where
+  plain clicks select instead of opening — the touch path. Selection lives in the
+  `selectedPaths` map; the batch bar (`#batch-bar`, shown while selecting or when
+  non-empty) offers Trash / Move to… / Download / Delete / Clear with per-entry failure
+  counting (`batchSuffix`), one `refreshCurrentView()` at the end and
+  `rekeyFolderPaths()` per moved entry. Batch move opens the destination picker with
+  `pickerMode: "batch-move"` and `pickerEntry = null` (OK disabled at the current
+  folder); Delete confirms once. Rows/cards get `.selected`; `navigate()` and
+  `enterVirtualView()` clear the selection, so batch paths can never leak across
+  listings — stale paths are skipped by `selectionEntries()`.
 - Drag-and-drop upload: `dragenter`/`dragover`/`dragleave`/`drop` on `main` feed
   `e.dataTransfer.files` into the existing `uploadFiles()` flow. `dragCarriesFiles()`
   checks the `Files` type so internal drags (column reorder) are ignored;

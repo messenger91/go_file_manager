@@ -1355,9 +1355,42 @@ body[data-view="list"] .size-toggle {
 }
 
 /* The Search button stays highlighted while its input is open. */
-#search-toggle[aria-expanded="true"] {
+#search-toggle[aria-expanded="true"],
+#select-toggle[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* Batch selection bar, shown while entries are selected or Select mode is on. */
+.batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+}
+
+.batch-bar[hidden] {
+  display: none;
+}
+
+.batch-count {
+  margin-right: auto;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+tr.selected {
+  background: var(--surface-2);
+}
+
+.card.selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .when-edit {

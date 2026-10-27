@@ -684,72 +684,146 @@ func (f *FS) Zip(rel string, w io.Writer) error {
 	if !info.IsDir() {
 		return fmt.Errorf("%s is not a directory", rel)
 	}
-	rootName := filepath.Base(full)
 
 	zipw := zip.NewWriter(w)
-	err = filepath.WalkDir(full, func(p string, d fs.DirEntry, walkErr error) error {
+	if err := zipDir(zipw, full, info, filepath.Base(full)); err != nil {
+		_ = zipw.Close()
+		return err
+	}
+	return zipw.Close()
+}
+
+// ZipMulti writes several entries into one archive: files land at the archive
+// root under their own names, folders as subtrees rooted at the folder. Name
+// collisions get " 2", " 3", … appended. Everything is resolved and stated
+// before the first byte is written, so the caller can still report a bad path
+// in its status code; mid-walk problems are skipped like in Zip.
+func (f *FS) ZipMulti(rels []string, w io.Writer) error {
+	type target struct {
+		full string
+		info os.FileInfo
+	}
+	targets := make([]target, 0, len(rels))
+	for _, rel := range rels {
+		full, err := f.resolve(rel)
+		if err != nil {
+			return err
+		}
+		info, err := os.Stat(full)
+		if err != nil {
+			return err
+		}
+		targets = append(targets, target{full: full, info: info})
+	}
+
+	used := map[string]bool{}
+	zipw := zip.NewWriter(w)
+	for _, t := range targets {
+		arcname := uniqueArcname(used, filepath.Base(t.full))
+		var err error
+		if t.info.IsDir() {
+			err = zipDir(zipw, t.full, t.info, arcname)
+		} else {
+			err = zipOne(zipw, t.full, t.info, arcname)
+		}
+		if err != nil {
+			_ = zipw.Close()
+			return err
+		}
+	}
+	return zipw.Close()
+}
+
+// uniqueArcname returns name, or name with " 2", " 3", … inserted before the
+// extension, so two selected entries with the same name both land in the
+// archive.
+func uniqueArcname(used map[string]bool, name string) string {
+	if !used[name] {
+		used[name] = true
+		return name
+	}
+	base, ext := name, ""
+	if i := strings.LastIndexByte(name, '.'); i > 0 && i < len(name)-1 {
+		base, ext = name[:i], name[i:]
+	}
+	for n := 2; ; n++ {
+		candidate := fmt.Sprintf("%s %d%s", base, n, ext)
+		if !used[candidate] {
+			used[candidate] = true
+			return candidate
+		}
+	}
+}
+
+// zipDir writes the tree rooted at full under the archive name arcname (the
+// folder itself first, with a trailing slash).
+func zipDir(zipw *zip.Writer, full string, info os.FileInfo, arcname string) error {
+	if err := zipOne(zipw, full, info, arcname); err != nil {
+		return err
+	}
+	return filepath.WalkDir(full, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if p == full {
 				return walkErr
 			}
 			return nil // skip unreadable subtrees
 		}
+		if p == full {
+			return nil // the root entry is already written
+		}
 		relToRoot, err := filepath.Rel(full, p)
 		if err != nil {
 			return nil
-		}
-		arcname := rootName
-		if relToRoot != "." {
-			arcname = rootName + "/" + filepath.ToSlash(relToRoot)
 		}
 		info, err := d.Info()
 		if err != nil {
 			return nil // broken symlink or an entry that just vanished
 		}
-		header, err := zip.FileInfoHeader(info)
+		return zipOne(zipw, p, info, arcname+"/"+filepath.ToSlash(relToRoot))
+	})
+}
+
+// zipOne writes a single entry (symlink, directory or regular file) and skips
+// anything it cannot read or represent.
+func zipOne(zipw *zip.Writer, path string, info os.FileInfo, arcname string) error {
+	header, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return nil
+	}
+	header.Name = arcname
+	if info.IsDir() {
+		header.Name += "/"
+	}
+	header.Modified = info.ModTime()
+
+	switch {
+	case info.Mode()&os.ModeSymlink != 0:
+		target, err := os.Readlink(path)
 		if err != nil {
 			return nil
 		}
-		header.Name = arcname
-		if info.IsDir() {
-			header.Name += "/"
+		writer, err := zipw.CreateHeader(header)
+		if err != nil {
+			return err
 		}
-		header.Modified = info.ModTime()
-
-		switch {
-		case info.Mode()&os.ModeSymlink != 0:
-			target, err := os.Readlink(p)
-			if err != nil {
-				return nil
-			}
-			writer, err := zipw.CreateHeader(header)
-			if err != nil {
-				return err
-			}
-			_, err = io.WriteString(writer, target)
-			return err
-		case info.IsDir():
-			_, err := zipw.CreateHeader(header)
-			return err
-		case info.Mode().IsRegular():
-			file, err := os.Open(p)
-			if err != nil {
-				return nil // skip files that refuse to open
-			}
-			defer file.Close()
-			writer, err := zipw.CreateHeader(header)
-			if err != nil {
-				return err
-			}
-			_, err = io.Copy(writer, file)
-			return err
-		default:
-			return nil
-		}
-	})
-	if err != nil {
-		_ = zipw.Close()
+		_, err = io.WriteString(writer, target)
 		return err
+	case info.IsDir():
+		_, err := zipw.CreateHeader(header)
+		return err
+	case info.Mode().IsRegular():
+		file, err := os.Open(path)
+		if err != nil {
+			return nil // skip files that refuse to open
+		}
+		defer file.Close()
+		writer, err := zipw.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(writer, file)
+		return err
+	default:
+		return nil
 	}
-	return zipw.Close()
 }

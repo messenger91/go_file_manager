@@ -265,6 +265,9 @@ redirected to `/login`. `POST /logout` ends the session.
 | POST   | `/api/copy`     | Copy a file or folder to another path|
 | POST   | `/api/trash`    | Move a file or folder into `/.trash` |
 | POST   | `/api/trash/empty` | Permanently remove everything in `/.trash` |
+| POST   | `/api/share`    | Create a public share link (`&ttl=7d`, optional) |
+| GET    | `/api/shares`   | List active share links          |
+| DELETE | `/api/share`    | Revoke a share link (`?token=…`) |
 | POST   | `/api/create`   | Create an empty file                 |
 | PUT    | `/api/write`    | Overwrite a file (body is new content)|
 | POST   | `/api/upload`   | Upload one or more files (multipart) |
@@ -306,10 +309,33 @@ trash folder counts as nothing to remove, and this cannot be undone — the UI
 asks for confirmation first.
 
 `GET /api/download-zip?path=/docs` streams the whole folder as `docs.zip`,
-with the folder itself as the archive's root entry. Symlinks are stored as
-links and never followed, unreadable subtrees are skipped, and the response
-cannot report per-file failures once it has started. Zipping a file instead
-of a folder returns `400`.
+with the folder itself as the archive's root entry. Several `path=` arguments
+select multiple entries into one `selected.zip` (files included, name
+collisions get " 2" appended). Symlinks are stored as links and never
+followed, unreadable subtrees are skipped, and the response cannot report
+per-file failures once it has started. Zipping a single file instead of a
+folder returns `400`.
+
+`POST /api/share?path=/docs&ttl=7d` mints a public, read-only link to one
+entry and responds with `{"token", "url", "path", "name", "isDir", "expires"}`.
+Anyone with the link can `GET /s/<token>` — files stream inline when their
+type is previewable and as downloads otherwise, folders stream as a zip.
+`ttl` is optional (never expires by default); it accepts `7d`, `12h`, `30m`
+and other durations. `GET /api/shares` lists the active links and
+`DELETE /api/share?token=…` revokes one. Shares live in memory, so a server
+restart revokes all of them; a renamed or deleted entry makes its link 404.
+
+### Credentials and sessions
+
+`ADMIN`/`PASSWORD` are read as plaintext, but `PASSWORD_HASH` replaces the
+password check entirely: set it to a `pbkdf2-sha256$<iterations>$<salt>$<digest>`
+line produced by `go run ./cmd/hashpw 'your password'` (each run uses a fresh
+random salt) and remove `PASSWORD`. A malformed hash fails closed — password
+logins are refused until it is fixed — and the login form throttles guessing:
+after 5 failures from one address, further attempts are bounced for a window
+that doubles up to 5 minutes. `SESSIONS_FILE=/path/sessions.json` (mode 0600,
+created automatically) persists sessions across restarts; without it they live
+in memory and a restart logs everyone out.
 
 `GET /api/search?q=report` matches entry names containing `report`
 case-insensitively, walking the tree recursively from `path` (default `/`) with

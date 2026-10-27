@@ -29,17 +29,40 @@ type Server struct {
 	web      fs.FS
 	logger   *log.Logger
 	sessions *sessionStore
+	logins   *loginThrottle
+	shares   *shareStore
+	// passwordHash is the parsed PASSWORD_HASH; nil falls back to the
+	// plaintext PASSWORD comparison. A malformed hash stays nil and refuses
+	// every password (fail closed) after logging a warning.
+	passwordHash *passwordVerifier
 }
 
 // New builds a Server. web is the filesystem holding the static UI assets.
 func New(cfg *config.Config, fm *files.FS, web fs.FS, logger *log.Logger) *Server {
-	return &Server{
+	s := &Server{
 		cfg:      cfg,
 		fm:       fm,
 		web:      web,
 		logger:   logger,
 		sessions: newSessionStore(),
+		logins:   newLoginThrottle(),
+		shares:   newShareStore(),
 	}
+	if cfg.SessionsFile != "" {
+		s.sessions = newSessionStoreFile(cfg.SessionsFile, logger)
+	}
+	if cfg.PasswordHash != "" {
+		verifier, err := parsePasswordHash(cfg.PasswordHash)
+		if err != nil {
+			// Fail closed: a broken hash must never downgrade to the
+			// plaintext PASSWORD (whose default is admin/admin).
+			logger.Printf("PASSWORD_HASH is malformed, password logins are refused until it is fixed: %v", err)
+			s.passwordHash = &passwordVerifier{broken: true}
+		} else {
+			s.passwordHash = verifier
+		}
+	}
+	return s
 }
 
 // Handler returns the fully wired HTTP handler.
@@ -66,14 +89,19 @@ func (s *Server) Handler() http.Handler {
 	app.HandleFunc("POST /api/create", s.handleCreate)
 	app.HandleFunc("PUT /api/write", s.handleWrite)
 	app.HandleFunc("POST /api/upload", s.handleUpload)
+	app.HandleFunc("POST /api/share", s.handleShareCreate)
+	app.HandleFunc("GET /api/shares", s.handleShareList)
+	app.HandleFunc("DELETE /api/share", s.handleShareRevoke)
 	app.Handle("/", http.FileServer(http.FS(s.web)))
 
 	mux := http.NewServeMux()
-	// Public routes: the login form, logout, and the assets the form needs.
+	// Public routes: the login form, logout, the assets the form needs, and
+	// shared links (each token is its own capability).
 	mux.HandleFunc("GET /login", s.handleLoginPage)
 	mux.HandleFunc("POST /login", s.handleLoginSubmit)
 	mux.HandleFunc("POST /logout", s.handleLogout)
 	mux.Handle("GET /static/", http.FileServer(http.FS(s.web)))
+	mux.HandleFunc("GET /s/", s.handleShareGet)
 	// Everything else needs a session (or Basic credentials).
 	mux.Handle("/", s.withAuth(app))
 
@@ -224,34 +252,69 @@ func (s *Server) handleDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 
-	name := strings.ReplaceAll(info.Name(), `"`, "")
-	contentType := "application/octet-stream"
-	if mt, ok := mediaTypes[strings.ToLower(filepath.Ext(info.Name()))]; ok {
-		contentType = mt
-	}
-	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`"`)
+	w.Header().Set("Content-Type", contentTypeFor(info.Name()))
+	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(info.Name(), `"`, "")+`"`)
 	http.ServeContent(w, r, info.Name(), info.ModTime(), file)
 }
 
+// contentTypeFor maps a file name to its Content-Type for streaming routes.
+// Anything unmapped keeps application/octet-stream; browsers sniff <img> and
+// <video> sources by content, but <embed> needs the real type.
+func contentTypeFor(name string) string {
+	if mt, ok := mediaTypes[strings.ToLower(filepath.Ext(name))]; ok {
+		return mt
+	}
+	return "application/octet-stream"
+}
+
 func (s *Server) handleDownloadZip(w http.ResponseWriter, r *http.Request) {
-	rel := r.URL.Query().Get("path")
-	entry, err := s.fm.Stat(rel)
-	if err != nil {
-		s.writeError(w, err)
+	paths := r.URL.Query()["path"]
+	if len(paths) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "no path given"})
 		return
 	}
-	if !entry.IsDir {
+	// Resolve and stat everything up front, so a bad path still maps to its
+	// status code instead of corrupting a half-written archive.
+	type zipTarget struct {
+		rel   string
+		entry files.Entry
+	}
+	targets := make([]zipTarget, 0, len(paths))
+	seen := map[string]bool{}
+	for _, p := range paths {
+		entry, err := s.fm.Stat(p)
+		if err != nil {
+			s.writeError(w, err)
+			return
+		}
+		if !seen[entry.Path] {
+			seen[entry.Path] = true
+			targets = append(targets, zipTarget{rel: entry.Path, entry: entry})
+		}
+	}
+
+	var name string
+	switch {
+	case len(targets) == 1 && targets[0].entry.IsDir:
+		name = targets[0].entry.Name + ".zip"
+	case len(targets) == 1:
+		// A single file is what /api/download is for.
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "not a folder"})
 		return
+	default:
+		name = "selected.zip"
 	}
-	name := strings.ReplaceAll(entry.Name, `"`, "")
 	w.Header().Set("Content-Type", "application/zip")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+name+`.zip"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+strings.ReplaceAll(name, `"`, "")+`"`)
+
+	rels := make([]string, len(targets))
+	for i, t := range targets {
+		rels[i] = t.rel
+	}
 	// Once the archive has started, mid-walk problems can no longer change the
 	// status code; files.Zip skips what it cannot read and logs the rest here.
-	if err := s.fm.Zip(rel, w); err != nil {
-		s.logger.Printf("error: zip %s: %v", rel, err)
+	if err := s.fm.ZipMulti(rels, w); err != nil {
+		s.logger.Printf("error: zip %v: %v", rels, err)
 	}
 }
 

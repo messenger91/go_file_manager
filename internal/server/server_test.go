@@ -3,6 +3,7 @@ package server
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 	"io"
 	"log"
@@ -14,6 +15,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"go_file_manager/internal/config"
 	"go_file_manager/internal/files"
@@ -643,5 +645,319 @@ func TestDownloadZipEndpoint(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/download-zip?path=/docs", nil)
 	if rec := s.do(t, req); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("unauthenticated status = %d, want 401", rec.Code)
+	}
+}
+
+func TestPBKDF2SHA256KnownVectors(t *testing.T) {
+	// Published PBKDF2-HMAC-SHA256 vectors for P="password", S="salt".
+	vectors := []struct {
+		iterations int
+		keyLen     int
+		want       string
+	}{
+		{1, 32, "120fb6cffcf8b32c43e7225256c4f837a86548c92ccc35480805987cb70be17b"},
+		{2, 32, "ae4d0c95af6b46d32d0adff928f06dd02a303f8ef3c251dfd6e2d85a95474c43"},
+		{4096, 32, "c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a"},
+	}
+	for _, v := range vectors {
+		got := pbkdf2SHA256([]byte("password"), []byte("salt"), v.iterations, v.keyLen)
+		if hex.EncodeToString(got) != v.want {
+			t.Errorf("pbkdf2(c=%d) = %x, want %s", v.iterations, got, v.want)
+		}
+	}
+}
+
+func TestPasswordHashRoundTrip(t *testing.T) {
+	encoded, err := NewPasswordHash("hunter2", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(encoded, passwordHashPrefix) {
+		t.Fatalf("hash = %q, want the %s... format", encoded, passwordHashPrefix)
+	}
+	verifier, err := parsePasswordHash(encoded)
+	if err != nil {
+		t.Fatalf("parse own hash: %v", err)
+	}
+	if !verifier.verify("hunter2") {
+		t.Error("correct password rejected")
+	}
+	if verifier.verify("hunter3") {
+		t.Error("wrong password accepted")
+	}
+
+	for _, bad := range []string{
+		"",
+		"sha256$1000$abc$def",
+		"pbkdf2-sha256$",
+		"pbkdf2-sha256$0$YWJjZGVmZ2hpamtsbW5vcA==$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"pbkdf2-sha256$1000$short$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+		"pbkdf2-sha256$1000$YWJjZGVmZ2hpamtsbW5vcA==$AAAA",
+	} {
+		if _, err := parsePasswordHash(bad); err == nil {
+			t.Errorf("parsePasswordHash(%q) accepted a malformed hash", bad)
+		}
+	}
+}
+
+func TestAuthenticateWithPasswordHash(t *testing.T) {
+	encoded, err := NewPasswordHash("secret", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := fstest.MapFS{"index.html": {Data: []byte("<!doctype html><title>app</title>")}}
+	cfg := &config.Config{
+		HomeDir:      t.TempDir(),
+		Admin:        "admin",
+		Password:     "plaintext-should-be-ignored",
+		PasswordHash: encoded,
+		Port:         "0",
+	}
+	s := New(cfg, files.New(cfg.HomeDir), web, log.New(io.Discard, "", 0))
+
+	req := httptest.NewRequest("GET", "/api/info", nil)
+	req.SetBasicAuth("admin", "secret")
+	if rec := s.do(t, req); rec.Code != http.StatusOK {
+		t.Fatalf("hash login status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	req = httptest.NewRequest("GET", "/api/info", nil)
+	req.SetBasicAuth("admin", "plaintext-should-be-ignored")
+	if rec := s.do(t, req); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("plaintext password status = %d, want 401 when a hash is configured", rec.Code)
+	}
+
+	// A malformed hash fails closed: even the right plaintext is refused.
+	cfg = &config.Config{HomeDir: t.TempDir(), Admin: "admin", Password: "x", PasswordHash: "garbage", Port: "0"}
+	s = New(cfg, files.New(cfg.HomeDir), web, log.New(io.Discard, "", 0))
+	req = httptest.NewRequest("GET", "/api/info", nil)
+	req.SetBasicAuth("admin", "x")
+	if rec := s.do(t, req); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("malformed hash status = %d, want 401 (fail closed)", rec.Code)
+	}
+}
+
+func TestLoginThrottle(t *testing.T) {
+	s := newTestServer(t)
+
+	attempt := func(password string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := form(url.Values{"username": {"admin"}, "password": {password}, "next": {"/"}})
+		return s.do(t, req)
+	}
+
+	// Five failures are free; from the sixth, even the correct password is
+	// bounced for a while.
+	for i := 0; i < loginFailLimit; i++ {
+		if rec := attempt("wrong"); rec.Code != http.StatusSeeOther {
+			t.Fatalf("failure #%d status = %d, want 303", i+1, rec.Code)
+		}
+	}
+	if rec := attempt("secret"); rec.Code != http.StatusSeeOther {
+		t.Fatalf("throttled correct password status = %d, want 303 redirect to the error", rec.Code)
+	}
+	if loc := attempt("secret").Header().Get("Location"); !strings.Contains(loc, "error=1") {
+		t.Fatalf("throttled login Location = %q, want the error redirect", loc)
+	}
+
+	// A different source address is not affected.
+	req := form(url.Values{"username": {"admin"}, "password": {"secret"}, "next": {"/"}})
+	req.RemoteAddr = "10.9.9.9:5555"
+	if rec := s.do(t, req); rec.Code != http.StatusSeeOther {
+		t.Fatalf("other address status = %d, want 303", rec.Code)
+	}
+	if loc := s.do(t, req).Header().Get("Location"); strings.Contains(loc, "error=1") {
+		t.Fatalf("other address Location = %q, want a successful login", loc)
+	}
+}
+
+func TestSessionStorePersistsToFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sessions.json")
+	logger := log.New(io.Discard, "", 0)
+
+	first := newSessionStoreFile(path, logger)
+	token, err := first.create("admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh store over the same file keeps the live session (a restart).
+	second := newSessionStoreFile(path, logger)
+	if _, ok := second.get(token); !ok {
+		t.Fatal("session did not survive the store restart")
+	}
+	second.delete(token)
+
+	// Deletion is persisted too.
+	third := newSessionStoreFile(path, logger)
+	if _, ok := third.get(token); ok {
+		t.Fatal("deleted session came back after the store restart")
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("sessions file mode = %v, %v; want 0600", info.Mode(), err)
+	}
+}
+
+func TestParseShareTTL(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want time.Duration
+		bad  bool
+	}{
+		{raw: "", want: 0},
+		{raw: "7d", want: 7 * 24 * time.Hour},
+		{raw: "12h", want: 12 * time.Hour},
+		{raw: "30m", want: 30 * time.Minute},
+		{raw: "0", bad: true},
+		{raw: "-1h", bad: true},
+		{raw: "bogus", bad: true},
+		{raw: "7x", bad: true},
+	}
+	for _, c := range cases {
+		got, err := parseShareTTL(c.raw)
+		if c.bad {
+			if err == nil {
+				t.Errorf("parseShareTTL(%q) = %v, want an error", c.raw, got)
+			}
+			continue
+		}
+		if err != nil || got != c.want {
+			t.Errorf("parseShareTTL(%q) = (%v, %v), want (%v, nil)", c.raw, got, err, c.want)
+		}
+	}
+}
+
+func TestShareEndpoints(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	if err := os.WriteFile(filepath.Join(root, "report.pdf"), []byte("%PDF-report"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "note.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	create := func(path, ttl string) *httptest.ResponseRecorder {
+		t.Helper()
+		endpoint := "/api/share?path=" + url.QueryEscape(path)
+		if ttl != "" {
+			endpoint += "&ttl=" + url.QueryEscape(ttl)
+		}
+		req := httptest.NewRequest("POST", endpoint, nil)
+		req.SetBasicAuth("admin", "secret")
+		return s.do(t, req)
+	}
+
+	// Share a file without a ttl.
+	rec := create("/report.pdf", "")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("create status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		Token  string `json:"token"`
+		URL    string `json:"url"`
+		Path   string `json:"path"`
+		IsDir  bool   `json:"isDir"`
+		Expiry string `json:"expires"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(created.Token) != 32 || created.URL != "/s/"+created.Token || created.IsDir {
+		t.Fatalf("share = %+v", created)
+	}
+	if created.Expiry != "0001-01-01T00:00:00Z" {
+		// A share without a ttl never expires: the zero time.
+		t.Fatalf("no-ttl share has expiry %q", created.Expiry)
+	}
+
+	// The public route serves the file inline (its type is mapped), without
+	// any authentication.
+	public := httptest.NewRequest("GET", "/s/"+created.Token, nil)
+	rec = s.do(t, public)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("public status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/pdf" {
+		t.Fatalf("public Content-Type = %q, want application/pdf", ct)
+	}
+	if cd := rec.Header().Get("Content-Disposition"); !strings.HasPrefix(cd, "inline") {
+		t.Fatalf("public Content-Disposition = %q, want inline", cd)
+	}
+	if rec.Body.String() != "%PDF-report" {
+		t.Fatalf("public body = %q", rec.Body.String())
+	}
+
+	// An unknown or malformed token is 404, never a path operation.
+	for _, tok := range []string{"", "nope", created.Token + "/x"} {
+		req := httptest.NewRequest("GET", "/s/"+tok, nil)
+		if rec := s.do(t, req); rec.Code != http.StatusNotFound {
+			t.Fatalf("GET /s/%q status = %d, want 404", tok, rec.Code)
+		}
+	}
+
+	// Folders are served as zips.
+	rec = create("/docs", "7d")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("folder share status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var folder struct {
+		Token string `json:"token"`
+		URL   string `json:"url"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &folder); err != nil {
+		t.Fatal(err)
+	}
+	rec = s.do(t, httptest.NewRequest("GET", folder.URL, nil))
+	if rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "application/zip" {
+		t.Fatalf("folder share status = %d, type %q", rec.Code, rec.Header().Get("Content-Type"))
+	}
+	if _, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len())); err != nil {
+		t.Fatalf("folder share is not a zip: %v", err)
+	}
+
+	// The list shows both shares; revoking removes the link.
+	req := httptest.NewRequest("GET", "/api/shares", nil)
+	req.SetBasicAuth("admin", "secret")
+	rec = s.do(t, req)
+	var list struct {
+		Shares []struct {
+			Token string `json:"token"`
+		} `json:"shares"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Shares) != 2 {
+		t.Fatalf("shares listed = %d, want 2", len(list.Shares))
+	}
+
+	req = httptest.NewRequest("DELETE", "/api/share?token="+url.QueryEscape(created.Token), nil)
+	req.SetBasicAuth("admin", "secret")
+	if rec := s.do(t, req); rec.Code != http.StatusOK {
+		t.Fatalf("revoke status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := s.do(t, httptest.NewRequest("GET", created.URL, nil)); rec.Code != http.StatusNotFound {
+		t.Fatalf("revoked link status = %d, want 404", rec.Code)
+	}
+	req = httptest.NewRequest("DELETE", "/api/share?token=nope", nil)
+	req.SetBasicAuth("admin", "secret")
+	if rec := s.do(t, req); rec.Code != http.StatusNotFound {
+		t.Fatalf("revoke unknown status = %d, want 404", rec.Code)
+	}
+
+	// Creating requires authentication like every other mutation.
+	if rec := s.do(t, httptest.NewRequest("POST", "/api/share?path=/docs", nil)); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated create status = %d, want 401", rec.Code)
+	}
+	// Sharing a missing path is 404.
+	if rec := create("/missing", ""); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing path status = %d, want 404", rec.Code)
+	}
+	// A bad ttl is 400.
+	if rec := create("/docs", "never"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad ttl status = %d, want 400", rec.Code)
 	}
 }

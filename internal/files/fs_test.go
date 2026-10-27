@@ -1282,3 +1282,59 @@ func TestZipRejectsFilesAndEscapes(t *testing.T) {
 		t.Fatal("zipping a clamped traversal path should fail")
 	}
 }
+
+func TestZipMulti(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "one"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "two"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "one", "readme.txt"), []byte("first"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "two", "readme.txt"), []byte("second"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "two", "extra.txt"), []byte("extra"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	var buf bytes.Buffer
+	// Both folders hold a readme.txt: the second lands as "readme 2.txt",
+	// and the whole two/ folder comes along as a subtree.
+	if err := f.ZipMulti([]string{"/one/readme.txt", "/two/readme.txt", "/two"}, &buf); err != nil {
+		t.Fatalf("zip multi: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := make(map[string]string)
+	for _, file := range zr.File {
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, _ := io.ReadAll(rc)
+		rc.Close()
+		byName[file.Name] = string(data)
+	}
+	want := map[string]string{
+		"readme.txt":     "first",
+		"readme 2.txt":   "second",
+		"two/":           "",
+		"two/readme.txt": "second",
+		"two/extra.txt":  "extra",
+	}
+	if len(byName) != len(want) {
+		t.Fatalf("archive has %v, want exactly %v", byName, want)
+	}
+	for name, content := range want {
+		if got, ok := byName[name]; !ok || got != content {
+			t.Errorf("entry %q = %q (present: %v), want %q", name, got, ok, content)
+		}
+	}
+}

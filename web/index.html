@@ -110,6 +110,13 @@
         aria-controls="search-input"
         title="Search files by name"
       >Search</button>
+      <button
+        id="select-toggle"
+        class="btn"
+        type="button"
+        aria-pressed="false"
+        title="Select multiple entries"
+      >Select</button>
       <input
         id="search-input"
         class="filter-input"
@@ -134,6 +141,14 @@
         <button class="size-btn" type="button" data-size="m" title="Medium cards">M</button>
         <button class="size-btn" type="button" data-size="l" title="Large cards">L</button>
       </div>
+    </div>
+    <div class="batch-bar" id="batch-bar" hidden>
+      <span class="batch-count" id="batch-count" aria-live="polite"></span>
+      <button id="batch-trash" class="btn" type="button">Move to trash</button>
+      <button id="batch-move" class="btn" type="button">Move to…</button>
+      <button id="batch-download" class="btn" type="button">Download</button>
+      <button id="batch-delete" class="btn danger" type="button">Delete</button>
+      <button id="batch-clear" class="btn" type="button">Clear</button>
     </div>
     <table class="listing">
       <thead>

@@ -83,6 +83,14 @@
     noteRemove: document.getElementById("note-remove"),
     searchInput: document.getElementById("search-input"),
     searchToggle: document.getElementById("search-toggle"),
+    selectToggle: document.getElementById("select-toggle"),
+    batchBar: document.getElementById("batch-bar"),
+    batchCount: document.getElementById("batch-count"),
+    batchTrash: document.getElementById("batch-trash"),
+    batchMove: document.getElementById("batch-move"),
+    batchDownload: document.getElementById("batch-download"),
+    batchDelete: document.getElementById("batch-delete"),
+    batchClear: document.getElementById("batch-clear"),
     emptyTrash: document.getElementById("empty-trash"),
     sizeToggle: document.getElementById("size-toggle"),
     grid: document.getElementById("grid"),
@@ -317,6 +325,225 @@
   // True when path is the trash folder itself or an entry inside it.
   function isInTrash(path) {
     return path === TRASH_PATH || path.indexOf(TRASH_PATH + "/") === 0;
+  }
+
+  // --- multi-select ---
+  // Selection is a per-browser, in-memory overlay on the listing: Ctrl/Cmd+click
+  // toggles, Shift+click ranges, and Select mode makes plain clicks select so
+  // touch screens can batch too. The paths are the keys; batch actions resolve
+  // them against the current listing.
+  let selectedPaths = {};
+  let selectMode = false;
+  let lastSelectedPath = null;
+
+  function isSelected(path) {
+    return Object.prototype.hasOwnProperty.call(selectedPaths, path);
+  }
+
+  function selectionCount() {
+    return Object.keys(selectedPaths).length;
+  }
+
+  // The selected entries that are still in the current listing; anything that
+  // left it (a mutation elsewhere, a stale path) is skipped by batch actions.
+  function selectionEntries() {
+    return Object.keys(selectedPaths)
+      .map(function (path) {
+        return currentEntries.find(function (e) {
+          return e.path === path;
+        });
+      })
+      .filter(Boolean);
+  }
+
+  function clearSelection() {
+    selectedPaths = {};
+    lastSelectedPath = null;
+    if (selectMode) {
+      selectMode = false;
+      els.selectToggle.setAttribute("aria-pressed", "false");
+    }
+    renderList();
+    updateBatchBar();
+  }
+
+  function toggleSelect(entry, extend) {
+    if (extend && lastSelectedPath) {
+      const visible = visibleEntries();
+      const from = visible.findIndex(function (e) { return e.path === lastSelectedPath; });
+      const to = visible.findIndex(function (e) { return e.path === entry.path; });
+      if (from !== -1 && to !== -1) {
+        const lo = Math.min(from, to);
+        const hi = Math.max(from, to);
+        visible.slice(lo, hi + 1).forEach(function (e) {
+          selectedPaths[e.path] = true;
+        });
+        renderList();
+        updateBatchBar();
+        return;
+      }
+    }
+    if (isSelected(entry.path)) {
+      delete selectedPaths[entry.path];
+    } else {
+      selectedPaths[entry.path] = true;
+      lastSelectedPath = entry.path;
+    }
+    renderList();
+    updateBatchBar();
+  }
+
+  function selectAllVisible() {
+    visibleEntries().forEach(function (entry) {
+      selectedPaths[entry.path] = true;
+    });
+    renderList();
+    updateBatchBar();
+  }
+
+  // The single place rows and cards route their clicks through: Select mode
+  // and the modifiers select, a plain click keeps its open/navigate behaviour
+  // (and clears an active selection first).
+  function handleEntryClick(e, entry) {
+    if (selectMode) {
+      toggleSelect(entry);
+      return;
+    }
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      toggleSelect(entry);
+      return;
+    }
+    if (e.shiftKey) {
+      e.preventDefault();
+      toggleSelect(entry, true);
+      return;
+    }
+    if (selectionCount() > 0) clearSelection();
+    if (entry.isDir) navigate(entry.path);
+    else openFile(entry);
+  }
+
+  function toggleSelectMode() {
+    selectMode = !selectMode;
+    els.selectToggle.setAttribute("aria-pressed", selectMode ? "true" : "false");
+    if (!selectMode) {
+      selectedPaths = {};
+      lastSelectedPath = null;
+    }
+    renderList();
+    updateBatchBar();
+    setStatus(selectMode ? "Selection mode: click entries to select them." : "", false);
+  }
+
+  function updateBatchBar() {
+    const count = selectionCount();
+    els.batchBar.hidden = !(selectMode || count > 0);
+    els.batchCount.textContent = count
+      ? count + (count === 1 ? " entry selected" : " entries selected")
+      : "Nothing selected yet";
+    els.batchTrash.hidden = trashView;
+    els.batchTrash.disabled = count === 0;
+    els.batchMove.disabled = count === 0;
+    els.batchDownload.disabled = count === 0;
+    els.batchDelete.disabled = count === 0;
+  }
+
+  // " (2 failed)" for a batch that only partly succeeded.
+  function batchSuffix(failed) {
+    return failed > 0 ? " (" + failed + " failed)" : "";
+  }
+
+  async function batchTrash() {
+    const entries = selectionEntries();
+    if (entries.length === 0) return;
+    let moved = 0;
+    let failed = 0;
+    for (const entry of entries) {
+      try {
+        const data = await apiTrash(entry.path);
+        rekeyFolderPaths(entry.path, data.path);
+        moved++;
+      } catch (_) {
+        failed++;
+      }
+    }
+    selectedPaths = {};
+    closeViewer();
+    await refreshCurrentView();
+    updateBatchBar();
+    setStatus("Moved " + moved + batchSuffix(failed) + " to trash.", failed > 0);
+  }
+
+  async function batchDelete() {
+    const entries = selectionEntries();
+    if (entries.length === 0) return;
+    const ok = await confirmDialog({
+      title: "Delete " + entries.length + " entries",
+      message:
+        "Delete " + entries.length + " selected entries (folders with everything inside them)? " +
+        "This cannot be undone.",
+      confirmLabel: "Delete",
+    });
+    if (!ok) return;
+    let deleted = 0;
+    let failed = 0;
+    for (const entry of entries) {
+      try {
+        await apiDelete(entry.path, entry.isDir);
+        forgetFolderPaths(entry.path);
+        deleted++;
+      } catch (_) {
+        failed++;
+      }
+    }
+    selectedPaths = {};
+    closeViewer();
+    await refreshCurrentView();
+    updateBatchBar();
+    setStatus("Deleted " + deleted + batchSuffix(failed) + ".", failed > 0);
+  }
+
+  function batchDownload() {
+    const paths = Object.keys(selectedPaths);
+    if (paths.length === 0) return;
+    if (paths.length === 1) {
+      const entry = currentEntries.find(function (e) {
+        return e.path === paths[0];
+      });
+      if (entry) {
+        downloadEntry(entry);
+        return;
+      }
+    }
+    const query = paths
+      .map(function (path) {
+        return "path=" + encodeURIComponent(path);
+      })
+      .join("&");
+    const a = document.createElement("a");
+    a.href = "/api/download-zip?" + query;
+    a.download = "selected.zip";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  // Batch move opens the shared destination picker with no single entry; the
+  // picker's confirm path knows how to move the whole selection.
+  function batchMove() {
+    const entries = selectionEntries();
+    if (entries.length === 0) return;
+    pickerMode = "batch-move";
+    pickerEntry = null;
+    pickerPath = currentPath;
+    els.destinationTitle.textContent = "Move " + entries.length + " entries";
+    els.destinationName.textContent = entries
+      .map(function (e) { return e.name; })
+      .join(", ");
+    els.destinationOk.textContent = "Move here";
+    els.destinationModal.hidden = false;
+    loadPickerFolders();
   }
 
   // Dot entries are hidden by default; the settings menu toggles them.
@@ -719,6 +946,12 @@
     setUploadDisabled(true);
     els.emptyTrash.hidden = true;
     closeSearchBar();
+    // Any selection belonged to the listing just left.
+    selectedPaths = {};
+    selectMode = false;
+    els.selectToggle.setAttribute("aria-pressed", "false");
+    lastSelectedPath = null;
+    updateBatchBar();
     setStatus("");
     closeViewer();
     filterText = "";
@@ -893,7 +1126,7 @@
     });
     if (!ok) return;
     try {
-      const data = await sendJSON("POST", "/api/trash/empty");
+      const data = await apiTrashEmpty();
       els.emptyTrash.disabled = true;
       await refreshCurrentView();
       setStatus(
@@ -996,7 +1229,7 @@
     );
   }
 
-  function settingsMenuItems() {
+  function settingsMenuItems(shares) {
     const tags = taggedPaths().length;
     function clearLabel(name, count) {
       return count ? name + " (" + count + ")" : name;
@@ -1060,12 +1293,57 @@
         action: clearNotes,
       }
     );
+    // Live share links, each revocable from its row. Fetched when the menu
+    // opens; a failure keeps the rest of the menu intact.
+    if (shares && shares.length > 0) {
+      items.push({ separator: true });
+      items.push({ group: "Shared links", count: shares.length });
+      shares.forEach(function (share) {
+        items.push({
+          label: share.path,
+          icon: "link",
+          detail: shareExpiryLabel(share),
+          title: share.url,
+          removeLabel: "Revoke share",
+          remove: function () {
+            apiShareRevoke(share.token).then(
+              function () {
+                setStatus('Share for "' + share.path + '" revoked.', false);
+                showSettingsMenu();
+              },
+              function (err) {
+                setStatus("Failed to revoke the share: " + err.message, true);
+              }
+            );
+          },
+        });
+      });
+    }
     return items;
   }
 
-  function showSettingsMenu() {
+  function shareExpiryLabel(share) {
+    if (!share.expires || String(share.expires).indexOf("0001-01-01") === 0) {
+      return "never expires";
+    }
+    const diff = new Date(share.expires).getTime() - Date.now();
+    if (diff <= 0) return "expired";
+    const hours = diff / 3600000;
+    if (hours < 1) return "expires in " + Math.max(1, Math.round(diff / 60000)) + " min";
+    if (hours < 48) return "expires in " + Math.round(hours) + " h";
+    return "expires in " + Math.round(hours / 24) + " days";
+  }
+
+  async function showSettingsMenu() {
+    let shares = [];
+    try {
+      const data = await apiShares();
+      shares = (data && data.shares) || [];
+    } catch (_) {
+      // Share rows stay out; the rest of the menu still opens.
+    }
     const rect = els.settingsToggle.getBoundingClientRect();
-    buildMenu(rect.right, rect.bottom + 6, settingsMenuItems(), "Settings");
+    buildMenu(rect.right, rect.bottom + 6, settingsMenuItems(shares), "Settings");
     els.contextMenu.dataset.source = "settings";
     els.settingsToggle.setAttribute("aria-expanded", "true");
   }
@@ -1450,6 +1728,23 @@
 
   function apiTrash(path) {
     return sendJSON("POST", "/api/trash?path=" + encodeURIComponent(path));
+  }
+
+  function apiTrashEmpty() {
+    return sendJSON("POST", "/api/trash/empty");
+  }
+
+  function apiShares() {
+    return sendJSON("GET", "/api/shares");
+  }
+
+  function apiShareCreate(path, ttl) {
+    const extra = ttl ? "&ttl=" + encodeURIComponent(ttl) : "";
+    return sendJSON("POST", "/api/share?path=" + encodeURIComponent(path) + extra);
+  }
+
+  function apiShareRevoke(token) {
+    return sendJSON("DELETE", "/api/share?token=" + encodeURIComponent(token));
   }
 
   function apiCreate(path) {
@@ -1955,9 +2250,9 @@
       tr.appendChild(renderCell(col, entry, pinned));
     });
 
-    tr.addEventListener("click", function () {
-      if (entry.isDir) navigate(entry.path);
-      else openFile(entry);
+    if (isSelected(entry.path)) tr.classList.add("selected");
+    tr.addEventListener("click", function (e) {
+      handleEntryClick(e, entry);
     });
     return tr;
   }
@@ -2306,11 +2601,11 @@
       card.appendChild(meta);
     }
     card.appendChild(actions);
+    if (isSelected(entry.path)) card.classList.add("selected");
     card.dataset.path = entry.path;
 
-    card.addEventListener("click", function () {
-      if (entry.isDir) navigate(entry.path);
-      else openFile(entry);
+    card.addEventListener("click", function (e) {
+      handleEntryClick(e, entry);
     });
     card.addEventListener("keydown", function (e) {
       // Ignore Enter/Space on the quick-action buttons inside the card.
@@ -2364,6 +2659,14 @@
       els.filter.placeholder = "Filter this folder…";
       els.filter.setAttribute("aria-label", "Filter files in this folder");
     }
+    // The selection belongs to the listing just left; batch paths from another
+    // folder would be wrong to act on.
+    if (selectionCount() > 0 || selectMode) {
+      selectedPaths = {};
+      selectMode = false;
+      els.selectToggle.setAttribute("aria-pressed", "false");
+    }
+    updateBatchBar();
     setStatus("");
     closeViewer();
     try {
@@ -2802,7 +3105,20 @@
   }
 
   function updatePickerState() {
-    if (!pickerEntry) return;
+    if (!pickerEntry && pickerMode !== "batch-move") return;
+    if (pickerMode === "batch-move") {
+      const count = selectionCount();
+      if (pickerPath === currentPath) {
+        els.destinationOk.disabled = true;
+        els.destinationHint.textContent =
+          "The entries are already in this folder — open another one below.";
+        return;
+      }
+      els.destinationOk.disabled = false;
+      const label = pickerPath === "/" ? "Home" : pathName(pickerPath);
+      els.destinationHint.textContent = "Move " + count + " entries into " + label + ".";
+      return;
+    }
     const here = parentOf(pickerEntry.path) === pickerPath;
     if (pickerMode !== "copy" && here) {
       els.destinationOk.disabled = true;
@@ -2835,7 +3151,35 @@
   }
 
   async function confirmPicker() {
-    if (!pickerEntry || els.destinationOk.disabled) return;
+    if (els.destinationOk.disabled) return;
+    if (pickerMode === "batch-move") {
+      const entries = selectionEntries();
+      if (entries.length === 0) return;
+      const dir = pickerPath;
+      let moved = 0;
+      let failed = 0;
+      for (const entry of entries) {
+        const destination = dir === "/" ? "/" + entry.name : dir + "/" + entry.name;
+        try {
+          await apiMove(entry.path, destination);
+          rekeyFolderPaths(entry.path, destination);
+          moved++;
+        } catch (_) {
+          failed++;
+        }
+      }
+      closePicker();
+      selectedPaths = {};
+      closeViewer();
+      await refreshCurrentView();
+      updateBatchBar();
+      setStatus(
+        "Moved " + moved + batchSuffix(failed) + " to " + dir + ".",
+        failed > 0
+      );
+      return;
+    }
+    if (!pickerEntry) return;
     const entry = pickerEntry;
     const mode = pickerMode;
     const dir = pickerPath;
@@ -3176,6 +3520,32 @@
     a.remove();
   }
 
+  // Creates a never-expiring share and copies the public URL. The clipboard
+  // is only available in secure contexts, so failures fall back to showing
+  // the link in the status line. Shares are listed and revoked in Settings.
+  function shareEntry(entry) {
+    apiShareCreate(entry.path)
+      .then(function (share) {
+        const url = window.location.origin + share.url;
+        const fallback = function () {
+          setStatus("Share link for " + entry.name + ": " + url, false);
+        };
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(url).then(
+            function () {
+              setStatus('Share link for "' + entry.name + '" copied to the clipboard.', false);
+            },
+            fallback
+          );
+        } else {
+          fallback();
+        }
+      })
+      .catch(function (err) {
+        setStatus("Failed to share " + entry.name + ": " + err.message, true);
+      });
+  }
+
   // --- right-click context menu ---
   // Inline SVG icons inherit the item colour (including the danger red) and
   // stay crisp at any zoom level.
@@ -3190,6 +3560,7 @@
     delete: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M10.5 11v5M13.5 11v5"/>',
     trash: '<path d="M4 7h16"/><path d="M9.5 7V4.8h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M12 10.5v4.5"/><path d="M9.9 12.9l2.1 2.1 2.1-2.1"/>',
     restore: '<path d="M4 9.5h9.5a5 5 0 1 1 0 10H9"/><path d="M8 5.5l-4 4 4 4"/>',
+    link: '<path d="M10.5 13.5a4.5 4.5 0 0 0 6.4.4l2.6-2.6a4.5 4.5 0 0 0-6.4-6.4l-1.3 1.3"/><path d="M13.5 10.5a4.5 4.5 0 0 0-6.4-.4l-2.6 2.6a4.5 4.5 0 0 0 6.4 6.4l1.3-1.3"/>',
     newFolder: '<path d="M3 7a2 2 0 0 1 2-2h3.6a2 2 0 0 1 1.6.8l1 1.2H19a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>',
     newFile: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M12 12v6M9 15h6"/>',
     upload: '<path d="M12 20V9"/><path d="M7 13.5l5-5 5 5"/><path d="M5 4h14"/>',
@@ -3544,6 +3915,11 @@
       danger: true,
       action: function () { deleteEntry(entry); },
     };
+    const shareItem = {
+      label: "Copy share link",
+      icon: "link",
+      action: function () { shareEntry(entry); },
+    };
 
     let items;
     if (isInTrash(entry.path) && entry.path !== TRASH_PATH) {
@@ -3572,6 +3948,7 @@
         copyItem,
         favoriteItem,
         { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
+        shareItem,
         { separator: true },
         {
           label: isPinned(entry.path) ? "Unpin folder" : "Pin folder",
@@ -3601,6 +3978,7 @@
         copyItem,
         favoriteItem,
         { label: "Download", icon: "download", action: function () { downloadEntry(entry); } },
+        shareItem,
         { separator: true },
         {
           swatches: true,
@@ -3878,11 +4256,24 @@
     } else if (e.key === "Escape" && !els.viewer.hidden) {
       if (editing) cancelEdit();
       else closeViewer();
+    } else if (e.key === "Escape" && selectionCount() > 0) {
+      clearSelection();
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === "a" || e.key === "A") && !isTextInput(e.target)) {
+      e.preventDefault();
+      selectAllVisible();
     } else if ((e.ctrlKey || e.metaKey) && e.key === "s" && editing) {
       e.preventDefault();
       saveEdit();
     }
   });
+
+  // Ctrl+A must keep its native meaning inside inputs and textareas.
+  function isTextInput(el) {
+    return (
+      el &&
+      (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)
+    );
+  }
 
   // --- filter and sort ---
   els.filter.addEventListener("input", function () {
@@ -3924,6 +4315,17 @@
 
   // --- trash ---
   els.emptyTrash.addEventListener("click", emptyTrash);
+
+  // --- multi-select and batch actions ---
+  els.selectToggle.addEventListener("click", function (e) {
+    e.stopPropagation();
+    toggleSelectMode();
+  });
+  els.batchTrash.addEventListener("click", batchTrash);
+  els.batchDelete.addEventListener("click", batchDelete);
+  els.batchMove.addEventListener("click", batchMove);
+  els.batchDownload.addEventListener("click", batchDownload);
+  els.batchClear.addEventListener("click", clearSelection);
 
   // Sorting is delegated so the header can be rebuilt when columns change.
   els.head.addEventListener("click", function (e) {
