@@ -1099,3 +1099,49 @@ func TestUploadEndpointNestedPaths(t *testing.T) {
 		t.Fatal("the upload escaped the root")
 	}
 }
+
+func TestChmodEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	root := s.fm.Root()
+	if err := os.WriteFile(filepath.Join(root, "run.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	chmod := func(path, mode string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(
+			"POST",
+			"/api/chmod?path="+url.QueryEscape(path)+"&mode="+url.QueryEscape(mode),
+			nil,
+		)
+		req.SetBasicAuth("admin", "secret")
+		return s.do(t, req)
+	}
+
+	if rec := chmod("/run.sh", "755"); rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if info, err := os.Stat(filepath.Join(root, "run.sh")); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("mode = %v, %v; want 0755", info.Mode(), err)
+	}
+
+	// The metadata now reports the new mode.
+	req := httptest.NewRequest("GET", "/api/metadata?path=/run.sh", nil)
+	req.SetBasicAuth("admin", "secret")
+	if rec := s.do(t, req); !strings.Contains(rec.Body.String(), "rwxr-xr-x") {
+		t.Fatalf("metadata mode = %s, want rwxr-xr-x", rec.Body.String())
+	}
+
+	if rec := chmod("/run.sh", "999"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("non-octal status = %d, want 400", rec.Code)
+	}
+	if rec := chmod("/run.sh", "7777"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("too many bits status = %d, want 400", rec.Code)
+	}
+	if rec := chmod("/missing", "644"); rec.Code != http.StatusNotFound {
+		t.Fatalf("missing status = %d, want 404", rec.Code)
+	}
+	if rec := s.do(t, httptest.NewRequest("POST", "/api/chmod?path=/run.sh&mode=644", nil)); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated status = %d, want 401", rec.Code)
+	}
+}

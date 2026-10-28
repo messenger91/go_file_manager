@@ -11,6 +11,9 @@
     viewerName: document.getElementById("viewer-name"),
     viewerBody: document.getElementById("viewer-body"),
     viewerMedia: document.getElementById("viewer-media"),
+    viewerPrev: document.getElementById("viewer-prev"),
+    viewerNext: document.getElementById("viewer-next"),
+    viewerCount: document.getElementById("viewer-count"),
     viewerDownload: document.getElementById("viewer-download"),
     viewerClose: document.getElementById("viewer-close"),
     viewerDelete: document.getElementById("viewer-delete"),
@@ -87,6 +90,8 @@
     noteRemove: document.getElementById("note-remove"),
     searchInput: document.getElementById("search-input"),
     searchToggle: document.getElementById("search-toggle"),
+    searchContent: document.getElementById("search-content"),
+    searchContentLabel: document.getElementById("search-content-label"),
     selectToggle: document.getElementById("select-toggle"),
     batchBar: document.getElementById("batch-bar"),
     batchCount: document.getElementById("batch-count"),
@@ -1142,6 +1147,7 @@
   function closeSearchBar() {
     searchOpen = false;
     els.searchInput.hidden = true;
+    els.searchContentLabel.hidden = true;
     els.filter.hidden = false;
     els.searchToggle.setAttribute("aria-expanded", "false");
   }
@@ -1331,16 +1337,23 @@
     els.searchInput.hidden = false;
     els.searchInput.value = query;
     els.filter.hidden = true;
+    els.searchContentLabel.hidden = false;
     els.searchToggle.setAttribute("aria-expanded", "true");
 
     try {
+      const content = els.searchContent.checked ? "&content=1" : "";
       const data = await sendJSON(
         "GET",
-        "/api/search?q=" + encodeURIComponent(query) + (showHidden ? "&hidden=1" : "")
+        "/api/search?q=" + encodeURIComponent(query) + content + (showHidden ? "&hidden=1" : "")
       );
       if (searchView !== query || seq !== viewSeq) return;
       renderEntries(data.entries);
-      if (data.truncated) {
+      if (data.scanLimit) {
+        setStatus(
+          "The scan budget ran out — results are complete for names, but content scanning stopped. Narrow the path to scan deeper.",
+          false
+        );
+      } else if (data.truncated) {
         setStatus(
           "Showing the first " + data.entries.length + " matches — narrow the query to see more.",
           false
@@ -1363,6 +1376,7 @@
     searchOpen = true;
     els.filter.hidden = true;
     els.searchInput.hidden = false;
+    els.searchContentLabel.hidden = false;
     els.searchToggle.setAttribute("aria-expanded", "true");
     els.searchInput.focus();
   }
@@ -1919,6 +1933,13 @@
     return sendJSON("POST", "/api/extract?path=" + encodeURIComponent(path));
   }
 
+  function apiChmod(path, mode) {
+    return sendJSON(
+      "POST",
+      "/api/chmod?path=" + encodeURIComponent(path) + "&mode=" + encodeURIComponent(mode)
+    );
+  }
+
   function apiShareRevoke(token) {
     return sendJSON("DELETE", "/api/share?token=" + encodeURIComponent(token));
   }
@@ -2293,7 +2314,71 @@
             (entry.size === 1 ? " byte)" : " bytes)")
     );
     appendPropertyRow("Modified", detailed ? formatTime(entry.modTime) : "—");
-    if (entry.mode) appendPropertyRow("Permissions", entry.mode);
+    if (entry.mode) {
+      appendPropertyRow("Permissions", entry.mode);
+      appendPermissionEditor(entry);
+    }
+  }
+
+  // The mode row is editable: a value like "-rw-r--r--" becomes an octal
+  // input ("644") with a Save button posting to /api/chmod.
+  function appendPermissionEditor(entry) {
+    const list = els.propertiesList;
+    const dt = document.createElement("dt");
+    dt.textContent = "Set permissions";
+    const dd = document.createElement("dd");
+
+    const editor = document.createElement("span");
+    editor.className = "perm-editor";
+    const input = document.createElement("input");
+    input.className = "perm-input";
+    input.value = modeStringToOctal(entry.mode);
+    input.maxLength = 4;
+    input.setAttribute("aria-label", "Permission bits in octal");
+    const save = document.createElement("button");
+    save.type = "button";
+    save.className = "btn";
+    save.textContent = "Save";
+
+    save.addEventListener("click", async function () {
+      const mode = input.value.trim();
+      if (!/^[0-7]{3,4}$/.test(mode)) {
+        setStatus("Permissions must be 3–4 octal digits, like 644 or 0755.", true);
+        return;
+      }
+      try {
+        await apiChmod(entry.path, mode);
+        setStatus("Permissions of " + entry.name + " set to " + mode.replace(/^0/, "") + ".", false);
+        await showProperties(entry);
+      } catch (err) {
+        setStatus("Failed to set permissions: " + err.message, true);
+      }
+    });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        save.click();
+      }
+    });
+
+    editor.append(input, save);
+    dd.appendChild(editor);
+    list.appendChild(dt);
+    list.appendChild(dd);
+  }
+
+  function modeStringToOctal(mode) {
+    // "-rw-r--r--" -> "644"; the leading type char is skipped.
+    let out = "";
+    for (let i = 1; i <= 7; i += 3) {
+      const trio = mode.slice(i, i + 3);
+      let v = 0;
+      if (trio[0] === "r") v += 4;
+      if (trio[1] === "w") v += 2;
+      if (trio[2] === "x" || trio[2] === "s" || trio[2] === "t") v += 1;
+      out += v;
+    }
+    return out;
   }
 
   // The listing data is shown immediately; /api/metadata then refreshes it so
@@ -2500,6 +2585,13 @@
       wrap.append(icon, label);
       appendEntryBadges(wrap, entry, pinned);
       td.appendChild(wrap);
+      if (entry.excerpt) {
+        const excerpt = document.createElement("span");
+        excerpt.className = "match-excerpt";
+        excerpt.textContent = (entry.line ? "line " + entry.line + ": " : "") + entry.excerpt;
+        excerpt.title = excerpt.textContent;
+        td.appendChild(excerpt);
+      }
     } else if (col.key === "size") {
       td.textContent = entry.isDir ? "—" : formatSize(entry.size);
     } else if (col.key === "time") {
@@ -2734,6 +2826,14 @@
     name.textContent = entry.name;
     name.title = entry.name;
 
+    let excerpt = null;
+    if (entry.excerpt) {
+      excerpt = document.createElement("div");
+      excerpt.className = "card-excerpt";
+      excerpt.textContent = (entry.line ? "line " + entry.line + ": " : "") + entry.excerpt;
+      excerpt.title = excerpt.textContent;
+    }
+
     const badges = document.createElement("span");
     badges.className = "card-badges";
     if (pinned) badges.appendChild(menuIcon("pin", "pin-badge"));
@@ -2770,6 +2870,7 @@
     actions.appendChild(deleteBtn);
 
     card.append(icon, name);
+    if (excerpt) card.appendChild(excerpt);
     if (badges.childElementCount > 0) card.appendChild(badges);
     if (!entry.isDir) {
       const meta = document.createElement("div");
@@ -2918,6 +3019,15 @@
     openEntry = entry;
     openFileEditable = false;
     recordRecent(entry);
+    // The lightbox context: the non-folder entries of the listing the viewer
+    // was opened from, so ‹ › and the arrow keys can step through them.
+    viewerFiles = excludePinned(visibleEntries()).filter(function (e) {
+      return !e.isDir;
+    });
+    viewerIndex = viewerFiles.findIndex(function (e) {
+      return e.path === entry.path;
+    });
+    updateViewerNav();
     els.viewer.hidden = false;
     els.viewerName.textContent = entry.name;
     els.viewerDownload.href = "/api/download?path=" + encodeURIComponent(entry.path);
@@ -2952,6 +3062,29 @@
     els.viewerEdit.hidden = !openFileEditable;
   }
 
+  // Lightbox state: which files ‹ › step through and where we are. An index
+  // of -1 (the entry is not part of the current listing) hides the controls.
+  let viewerFiles = [];
+  let viewerIndex = -1;
+
+  function updateViewerNav() {
+    const available = viewerFiles.length > 1 && viewerIndex !== -1;
+    els.viewerPrev.hidden = !available;
+    els.viewerNext.hidden = !available;
+    els.viewerCount.hidden = !available;
+    if (available) {
+      els.viewerCount.textContent = viewerIndex + 1 + " of " + viewerFiles.length;
+      els.viewerPrev.title = "Previous: " + viewerFiles[(viewerIndex - 1 + viewerFiles.length) % viewerFiles.length].name;
+      els.viewerNext.title = "Next: " + viewerFiles[(viewerIndex + 1) % viewerFiles.length].name;
+    }
+  }
+
+  function viewerStep(delta) {
+    if (viewerFiles.length <= 1 || viewerIndex === -1) return;
+    viewerIndex = (viewerIndex + delta + viewerFiles.length) % viewerFiles.length;
+    openFile(viewerFiles[viewerIndex]);
+  }
+
   function closeViewer() {
     cancelEdit();
     els.viewer.hidden = true;
@@ -2959,6 +3092,8 @@
     // Dropping the media element also stops a playing video or audio.
     els.viewerMedia.textContent = "";
     els.viewerMedia.hidden = true;
+    viewerFiles = [];
+    viewerIndex = -1;
     openEntry = null;
   }
 
@@ -4540,6 +4675,12 @@
   });
 
   els.viewerClose.addEventListener("click", closeViewer);
+  els.viewerPrev.addEventListener("click", function () {
+    viewerStep(-1);
+  });
+  els.viewerNext.addEventListener("click", function () {
+    viewerStep(1);
+  });
   els.viewer.addEventListener("click", function (e) {
     if (e.target === els.viewer && !editing) closeViewer();
   });
@@ -4572,6 +4713,27 @@
     } else if ((e.ctrlKey || e.metaKey) && e.key === "s" && editing) {
       e.preventDefault();
       saveEdit();
+    } else if (
+      e.key === "ArrowRight" &&
+      !els.viewer.hidden &&
+      !editing &&
+      !isTextInput(e.target) &&
+      e.target.tagName !== "VIDEO" &&
+      e.target.tagName !== "AUDIO"
+    ) {
+      // The media elements use the arrows for their own controls.
+      e.preventDefault();
+      viewerStep(1);
+    } else if (
+      e.key === "ArrowLeft" &&
+      !els.viewer.hidden &&
+      !editing &&
+      !isTextInput(e.target) &&
+      e.target.tagName !== "VIDEO" &&
+      e.target.tagName !== "AUDIO"
+    ) {
+      e.preventDefault();
+      viewerStep(-1);
     } else if (
       !e.ctrlKey &&
       !e.metaKey &&
@@ -4627,6 +4789,11 @@
       closeSearchBar();
       if (searchView !== null) navigate(currentPath, { recordHistory: false });
     }
+  });
+
+  // Toggling "in files" re-runs the query already on display.
+  els.searchContent.addEventListener("change", function () {
+    if (searchView !== null) runSearch(searchView, { recordHistory: false });
   });
 
   // --- trash ---

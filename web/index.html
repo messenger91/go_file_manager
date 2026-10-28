@@ -126,6 +126,9 @@
         aria-label="Search files by name"
         hidden
       >
+      <label class="search-content" id="search-content-label" hidden>
+        <input type="checkbox" id="search-content"> in files
+      </label>
       <button id="empty-trash" class="btn danger" type="button" hidden>Empty trash</button>
       <span class="item-count" id="item-count" aria-live="polite"></span>
       <button
@@ -169,6 +172,9 @@
           <button id="viewer-cancel" class="btn when-edit" type="button">Cancel</button>
           <button id="viewer-rename" class="btn when-browse" type="button">Rename</button>
           <button id="viewer-delete" class="btn danger when-browse" type="button">Delete</button>
+          <button id="viewer-prev" class="btn when-browse viewer-nav" type="button" title="Previous file">‹</button>
+          <span class="viewer-count when-browse" id="viewer-count" hidden></span>
+          <button id="viewer-next" class="btn when-browse viewer-nav" type="button" title="Next file">›</button>
           <a id="viewer-download" class="btn when-browse" href="#" download>Download</a>
           <button id="viewer-close" class="btn when-browse" type="button">Close</button>
         </div>

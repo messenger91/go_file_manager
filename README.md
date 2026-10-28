@@ -252,7 +252,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | Method | Path            | Description                          |
 | ------ | --------------- | ------------------------------------ |
 | GET    | `/api/list`     | List a directory (`?path=/sub`; add `&hidden=1` for dot entries) |
-| GET    | `/api/search`   | Recursive filename search (`?q=term`) |
+| GET    | `/api/search`   | Recursive search (`?q=term`; `&content=1` scans file contents) |
 | GET    | `/api/metadata` | Metadata for one path (`/api/stat` is an alias) |
 | GET    | `/api/read`     | Text preview of a file (max 2 MiB)   |
 | GET    | `/api/download` | Raw file download (Content-Type follows the extension) |
@@ -261,6 +261,7 @@ redirected to `/login`. `POST /logout` ends the session.
 | DELETE | `/api/delete`   | Delete a file or folder              |
 | POST   | `/api/mkdir`    | Create a folder                      |
 | POST   | `/api/rename`   | Rename a file or folder in place     |
+| POST   | `/api/chmod`    | Set permission bits (`&mode=644`)    |
 | POST   | `/api/move`     | Move a file or folder to another path|
 | POST   | `/api/copy`     | Copy a file or folder to another path|
 | POST   | `/api/trash`    | Move a file or folder into `/.trash` |
@@ -343,6 +344,11 @@ case-insensitively, walking the tree recursively from `path` (default `/`) with
 the same dot-entry rules as `/api/list`. Directory symlinks are never followed,
 results are sorted like a listing (folders first) and capped at 200
 (`"truncated": true` marks a cut-off result), and an empty query returns `400`.
+With `&content=1` the contents of regular text files (up to 1 MiB each, no
+NUL bytes in the first 8 KiB) are scanned too: matching files report the first
+matching line as `excerpt` with its 1-based `line`, and `"scanLimit": true`
+says the 64 MiB scan budget ran out before the walk finished (content scanning
+stops; name matching continues).
 
 `POST /api/create?path=/sub/note.txt` creates an empty file (`409` if it exists).
 `PUT /api/write?path=/sub/note.txt` replaces a file's contents with the raw
@@ -361,6 +367,10 @@ folder, that wrapper is stripped, so this app's own zip downloads extract
 without double nesting. Zip-slip entry names and symlink entries are refused
 outright, the declared uncompressed total is capped at 1 GiB (`413` above
 that), and a failed extraction removes whatever was written so far.
+
+`POST /api/chmod?path=/sub/run.sh&mode=755` sets the permission bits (octal,
+permission bits only). Symlink targets are refused with `403`, since
+`chmod` follows links and a link inside the root may point outside it.
 
 `GET /api/metadata?path=/file.txt` returns the same fields as a listing entry. It is
 also served as `GET /api/stat` for compatibility, but the UI uses `/api/metadata`:

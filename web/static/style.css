@@ -1288,6 +1288,25 @@ body[data-view="list"] .size-toggle {
   display: flex;
   gap: 0.5rem;
   flex: none;
+  align-items: center;
+}
+
+/* Lightbox stepping inside the viewer. */
+.viewer-count {
+  color: var(--muted);
+  font-size: 0.82rem;
+  white-space: nowrap;
+}
+
+.viewer-count[hidden] {
+  display: none;
+}
+
+.viewer-nav {
+  min-width: 2.1rem;
+  padding: 0.25rem 0.55rem;
+  font-size: 1.05rem;
+  line-height: 1.2;
 }
 
 .viewer-body {
@@ -1359,6 +1378,64 @@ body[data-view="list"] .size-toggle {
 #select-toggle[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* The "in files" toggle belongs to the open search bar. */
+.search-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.search-content[hidden] {
+  display: none;
+}
+
+/* Content-search excerpts under the matching name. */
+.match-excerpt {
+  display: block;
+  margin-left: 1.9rem;
+  margin-top: 0.1rem;
+  max-width: 420px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.card-excerpt {
+  margin-top: 0.15rem;
+  font-size: 0.78rem;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* The permission editor inside the Properties dialog. */
+.perm-editor {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.perm-input {
+  width: 5ch;
+  font: inherit;
+  font-size: 0.85rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.25rem 0.4rem;
 }
 
 /* Batch selection bar, shown while entries are selected or Select mode is on. */

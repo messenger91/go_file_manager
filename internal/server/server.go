@@ -82,6 +82,7 @@ func (s *Server) Handler() http.Handler {
 	app.HandleFunc("DELETE /api/delete", s.handleDelete)
 	app.HandleFunc("POST /api/mkdir", s.handleMkdir)
 	app.HandleFunc("POST /api/rename", s.handleRename)
+	app.HandleFunc("POST /api/chmod", s.handleChmod)
 	app.HandleFunc("POST /api/move", s.handleMove)
 	app.HandleFunc("POST /api/copy", s.handleCopy)
 	app.HandleFunc("POST /api/trash", s.handleTrash)
@@ -182,16 +183,19 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "search query is empty"})
 		return
 	}
-	showHidden := r.URL.Query().Get("hidden") == "1"
-	rel, entries, err := s.fm.Search(r.URL.Query().Get("path"), query, showHidden)
+	results, err := s.fm.Search(r.URL.Query().Get("path"), query, files.SearchOptions{
+		ShowHidden: r.URL.Query().Get("hidden") == "1",
+		Content:    r.URL.Query().Get("content") == "1",
+	})
 	if err != nil {
 		s.writeError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"path":      rel,
-		"entries":   entries,
-		"truncated": len(entries) >= files.MaxSearchResults,
+		"path":      results.Base,
+		"entries":   results.Matches,
+		"truncated": results.Truncated,
+		"scanLimit": results.ScanLimit,
 	})
 }
 
@@ -420,6 +424,22 @@ func (s *Server) handleExtract(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"extracted": dest})
+}
+
+// handleChmod sets the permission bits of one entry; mode is octal ("644",
+// "0755") and limited to the permission bits.
+func (s *Server) handleChmod(w http.ResponseWriter, r *http.Request) {
+	mode, err := strconv.ParseUint(r.URL.Query().Get("mode"), 8, 32)
+	if err != nil || mode > 0o777 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "mode must be octal permission bits like 644 or 0755"})
+		return
+	}
+	rel := r.URL.Query().Get("path")
+	if err := s.fm.Chmod(rel, os.FileMode(mode)); err != nil {
+		s.writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"path": rel, "mode": strconv.FormatUint(mode, 8)})
 }
 
 func (s *Server) handleWrite(w http.ResponseWriter, r *http.Request) {

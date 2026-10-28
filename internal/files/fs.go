@@ -3,6 +3,7 @@ package files
 
 import (
 	"archive/zip"
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -520,6 +521,25 @@ func (f *FS) Disk() (DiskInfo, error) {
 	}, nil
 }
 
+// Chmod sets the permission bits of the entry at rel. Symlink targets are
+// refused like Write refuses them: os.Chmod follows links, and a link inside
+// the root may point outside it, so chmodding through one would reach past
+// the boundary.
+func (f *FS) Chmod(rel string, mode os.FileMode) error {
+	full, err := f.resolveTarget(rel)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(full)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return ErrForbidden
+	}
+	return os.Chmod(full, mode)
+}
+
 // Delete removes a file or directory. Directories are removed non-recursively
 // unless recursive is true, in which case their entire contents are removed.
 func (f *FS) Delete(rel string, recursive bool) error {
@@ -627,24 +647,72 @@ func (f *FS) EmptyTrash() (int, error) {
 	return removed, nil
 }
 
+// MaxContentSearchSize is the largest file whose contents a content search
+// will read; bigger files are name-matched only.
+const MaxContentSearchSize = 1 << 20 // 1 MiB
+
+// contentSearchBudget caps the total number of bytes one content search may
+// scan, so a query over a huge tree cannot tie up the server. A var so tests
+// can shrink it.
+var contentSearchBudget = int64(64 << 20) // 64 MiB
+
+// SearchResult is one search match: the entry itself plus, for content
+// searches, the first matching line with its 1-based line number. A name
+// match has no excerpt.
+type SearchResult struct {
+	Entry
+	Excerpt string `json:"excerpt,omitempty"`
+	Line    int    `json:"line,omitempty"`
+}
+
+// SearchOptions tunes a search. ShowHidden applies the dot-entry rules;
+// Content additionally scans the contents of regular text files.
+type SearchOptions struct {
+	ShowHidden bool
+	Content    bool
+}
+
+// SearchResults carries what a search found: the searched folder, the matches
+// (capped at MaxSearchResults, sorted like List), and the two limit flags.
+type SearchResults struct {
+	Base      string
+	Matches   []SearchResult
+	Truncated bool // the result cap was reached
+	ScanLimit bool // content scanning stopped early: the budget ran out
+}
+
 // Search walks the folder at rootRel recursively and returns entries whose
-// name contains query, case-insensitively. The result is ordered like List
+// name contains query, case-insensitively; with Content it also scans the
+// contents of regular files up to MaxContentSearchSize each, reporting the
+// first matching line as an excerpt. A name match wins over a content match,
+// so a file is never reported twice. Results are ordered like List
 // (directories first, then case-insensitively by name) and capped at
-// MaxSearchResults entries, collected in walk order before sorting. Dot
-// entries — and the whole subtree beneath a dot folder such as the trash —
-// are skipped unless showHidden is set. Directory symlinks are never
-// followed, so a link cannot pull the search outside the root. The query must
-// not be empty (ErrInvalidName); the root itself is never a match.
-func (f *FS) Search(rootRel, query string, showHidden bool) (string, []Entry, error) {
+// MaxSearchResults, collected in walk order before sorting. Content scanning
+// stops early once contentSearchBudget bytes have been read, which the
+// ScanLimit flag reports. Dot entries — and the whole subtree beneath a dot
+// folder such as the trash — are skipped unless ShowHidden is set. Directory
+// symlinks are never followed and only regular files are scanned, so a link
+// cannot pull the search outside the root. The query must not be empty
+// (ErrInvalidName); the root itself is never a match.
+func (f *FS) Search(rootRel, query string, opts SearchOptions) (SearchResults, error) {
 	needle := strings.ToLower(strings.TrimSpace(query))
 	if needle == "" {
-		return "", nil, ErrInvalidName
+		return SearchResults{}, ErrInvalidName
 	}
 	full, err := f.resolve(rootRel)
 	if err != nil {
-		return "", nil, err
+		return SearchResults{}, err
 	}
-	entries := []Entry{}
+	results := SearchResults{Matches: []SearchResult{}}
+	remaining := contentSearchBudget
+	appendMatch := func(match SearchResult) error {
+		results.Matches = append(results.Matches, match)
+		if len(results.Matches) >= MaxSearchResults {
+			results.Truncated = true
+			return filepath.SkipAll
+		}
+		return nil
+	}
 	err = filepath.WalkDir(full, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			if p == full {
@@ -656,35 +724,90 @@ func (f *FS) Search(rootRel, query string, showHidden bool) (string, []Entry, er
 			return nil
 		}
 		name := d.Name()
-		if !showHidden && strings.HasPrefix(name, ".") {
+		if !opts.ShowHidden && strings.HasPrefix(name, ".") {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
-			return nil
-		}
-		if !strings.Contains(strings.ToLower(name), needle) {
 			return nil
 		}
 		info, err := d.Info()
 		if err != nil {
 			return nil // broken symlink or an entry that just vanished
 		}
-		entries = append(entries, f.entry(name, f.relOf(p), info))
-		if len(entries) >= MaxSearchResults {
-			return filepath.SkipAll
+		entry := f.entry(name, f.relOf(p), info)
+		if strings.Contains(strings.ToLower(name), needle) {
+			if err := appendMatch(SearchResult{Entry: entry}); err != nil {
+				return err
+			}
+			return nil
+		}
+		if !opts.Content || !info.Mode().IsRegular() || info.Size() > MaxContentSearchSize {
+			return nil
+		}
+		if remaining <= 0 {
+			results.ScanLimit = true
+			return nil
+		}
+		remaining -= info.Size()
+		if remaining <= 0 {
+			// The budget ends here; keep collecting name-only matches.
+			results.ScanLimit = true
+			return nil
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil // unreadable or just vanished
+		}
+		if excerpt, line, found := scanContent(data, needle); found {
+			if err := appendMatch(SearchResult{Entry: entry, Excerpt: excerpt, Line: line}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
 	if err != nil {
-		return "", nil, err
+		return SearchResults{}, err
 	}
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].IsDir != entries[j].IsDir {
-			return entries[i].IsDir
+	sort.Slice(results.Matches, func(i, j int) bool {
+		if results.Matches[i].IsDir != results.Matches[j].IsDir {
+			return results.Matches[i].IsDir
 		}
-		return strings.ToLower(entries[i].Name) < strings.ToLower(entries[j].Name)
+		return strings.ToLower(results.Matches[i].Name) < strings.ToLower(results.Matches[j].Name)
 	})
-	return f.relOf(full), entries, nil
+	results.Base = f.relOf(full)
+	return results, nil
+}
+
+// scanContent reports the first line of data containing the (lowercased)
+// needle, case-insensitively, with its 1-based line number. Files that look
+// binary — a NUL byte in the first 8 KiB — never match.
+func scanContent(data []byte, needle string) (string, int, bool) {
+	if len(needle) == 0 {
+		return "", 0, false
+	}
+	sniff := data
+	if len(sniff) > 8192 {
+		sniff = sniff[:8192]
+	}
+	if bytes.IndexByte(sniff, 0) != -1 {
+		return "", 0, false
+	}
+	idx := bytes.Index(bytes.ToLower(data), []byte(needle))
+	if idx == -1 {
+		return "", 0, false
+	}
+	line := 1 + bytes.Count(data[:idx], []byte("\n"))
+	start := bytes.LastIndexByte(data[:idx], '\n') + 1
+	end := idx + bytes.IndexByte(data[idx:], '\n')
+	if end < idx { // no newline after the match: the line runs to the end
+		end = len(data)
+	}
+	excerpt := strings.TrimSpace(string(data[start:end]))
+	const maxExcerpt = 200
+	if len(excerpt) > maxExcerpt {
+		excerpt = excerpt[:maxExcerpt] + "…"
+	}
+	return excerpt, line, true
 }
 
 // Zip writes the folder at rel into w as a zip archive whose root entry is the

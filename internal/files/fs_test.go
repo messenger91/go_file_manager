@@ -1080,10 +1080,11 @@ func TestSearchMatchesCaseInsensitivelyAndSortsLikeList(t *testing.T) {
 	}
 	f := New(root)
 
-	base, entries, err := f.Search("/", "REPORT", false)
+	results, err := f.Search("/", "REPORT", SearchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	base, entries := results.Base, results.Matches
 	if base != "/" {
 		t.Fatalf("base = %q, want /", base)
 	}
@@ -1122,7 +1123,10 @@ func TestSearchSkipsHiddenUnlessAsked(t *testing.T) {
 	}
 
 	// Hidden: the dotfile, the dot folder's subtree and the trash all stay out.
-	_, entries, err := f.Search("/", "needle", false)
+	_, entries, err := func() (string, []SearchResult, error) {
+		r, err := f.Search("/", "needle", SearchOptions{})
+		return r.Base, r.Matches, err
+	}()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1130,7 +1134,8 @@ func TestSearchSkipsHiddenUnlessAsked(t *testing.T) {
 		t.Fatalf("got %d entries without showHidden, want 0: %+v", len(entries), entries)
 	}
 
-	_, entries, err = f.Search("/", "needle", true)
+	r, err := f.Search("/", "needle", SearchOptions{ShowHidden: true})
+	_, entries = r.Base, r.Matches
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1160,10 +1165,11 @@ func TestSearchScopesToStartFolder(t *testing.T) {
 	}
 	f := New(root)
 
-	base, entries, err := f.Search("/docs", "needle", false)
+	results, err := f.Search("/docs", "needle", SearchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	base, entries := results.Base, results.Matches
 	if base != "/docs" {
 		t.Fatalf("base = %q, want /docs", base)
 	}
@@ -1183,12 +1189,12 @@ func TestSearchSkipsSymlinkedDirectories(t *testing.T) {
 	}
 	f := New(root)
 
-	_, entries, err := f.Search("/", "needle", true)
+	r, err := f.Search("/", "needle", SearchOptions{ShowHidden: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
-		t.Fatalf("search followed a symlinked directory: %+v", entries)
+	if len(r.Matches) != 0 {
+		t.Fatalf("search followed a symlinked directory: %+v", r.Matches)
 	}
 }
 
@@ -1202,19 +1208,19 @@ func TestSearchCapsResults(t *testing.T) {
 	}
 	f := New(root)
 
-	_, entries, err := f.Search("/", "capfile", false)
+	r, err := f.Search("/", "capfile", SearchOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != MaxSearchResults {
-		t.Fatalf("got %d entries, want the %d cap", len(entries), MaxSearchResults)
+	if len(r.Matches) != MaxSearchResults {
+		t.Fatalf("got %d entries, want the %d cap", len(r.Matches), MaxSearchResults)
 	}
 }
 
 func TestSearchEmptyQueryFails(t *testing.T) {
 	f := New(t.TempDir())
 	for _, q := range []string{"", "   "} {
-		if _, _, err := f.Search("/", q, false); !errors.Is(err, ErrInvalidName) {
+		if _, err := f.Search("/", q, SearchOptions{}); !errors.Is(err, ErrInvalidName) {
 			t.Fatalf("Search(%q) error = %v, want ErrInvalidName", q, err)
 		}
 	}
@@ -1554,5 +1560,132 @@ func TestExtractSizeCap(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "big")); !os.IsNotExist(err) {
 		t.Fatal("destination exists after a refused extraction")
+	}
+}
+
+func TestSearchContent(t *testing.T) {
+	root := t.TempDir()
+	// A name match needs no scan; a content match reports line and excerpt.
+	if err := os.WriteFile(filepath.Join(root, "needle.txt"), []byte("unrelated body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.conf"), []byte("first line\nset needle = true\nlast"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Binary-looking content never matches, even with the needle inside.
+	if err := os.WriteFile(filepath.Join(root, "blob.bin"), []byte("needle\x00binary"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Oversized files are name-matched only.
+	if err := os.WriteFile(filepath.Join(root, "big.dat"), []byte(strings.Repeat("needle", MaxContentSearchSize/6+1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A match inside a dot entry stays hidden unless showHidden is set.
+	if err := os.Mkdir(filepath.Join(root, ".hiddendir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".hiddendir", "inner.txt"), []byte("the needle hides here"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	r, err := f.Search("/", "needle", SearchOptions{Content: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Matches) != 2 {
+		t.Fatalf("got %d matches, want 2: %+v", len(r.Matches), r.Matches)
+	}
+	first, second := r.Matches[0], r.Matches[1]
+	if first.Name != "config.conf" || first.Line != 2 || first.Excerpt != "set needle = true" {
+		t.Fatalf("first match = %+v, want config.conf line 2", first)
+	}
+	if second.Name != "needle.txt" || second.Line != 0 || second.Excerpt != "" {
+		t.Fatalf("second match = %+v, want a bare name match for needle.txt", second)
+	}
+
+	r, err = f.Search("/", "needle", SearchOptions{Content: true, ShowHidden: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Matches) != 3 {
+		t.Fatalf("with showHidden got %d matches, want 3", len(r.Matches))
+	}
+}
+
+func TestSearchContentBudget(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "first.txt"), []byte("needle-x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "second.txt"), []byte("needle-y"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f := New(root)
+
+	old := contentSearchBudget
+	contentSearchBudget = 10
+	defer func() { contentSearchBudget = old }()
+
+	r, err := f.Search("/", "needle", SearchOptions{Content: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !r.ScanLimit {
+		t.Fatal("ScanLimit not reported after the budget ran out")
+	}
+	if len(r.Matches) != 1 || r.Matches[0].Name != "first.txt" {
+		t.Fatalf("matches = %+v, want only the file scanned before the budget ran out", r.Matches)
+	}
+}
+
+func TestChmod(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "script.sh"), []byte("#!/bin/sh\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	if err := os.WriteFile(filepath.Join(outside, "target.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(outside, "target.txt"), filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	f := New(root)
+
+	if err := f.Chmod("/script.sh", 0o755); err != nil {
+		t.Fatalf("chmod: %v", err)
+	}
+	info, err := os.Stat(filepath.Join(root, "script.sh"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o755 {
+		t.Fatalf("file mode = %v, want 0755", info.Mode().Perm())
+	}
+
+	if err := f.Chmod("/dir", 0o700); err != nil {
+		t.Fatalf("chmod dir: %v", err)
+	}
+	if info, _ := os.Stat(filepath.Join(root, "dir")); info.Mode().Perm() != 0o700 {
+		t.Fatalf("dir mode = %v, want 0700", info.Mode().Perm())
+	}
+
+	// Chmodding through a symlink is refused, so nothing outside is touched.
+	if err := f.Chmod("/link.txt", 0o777); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("symlink chmod error = %v, want ErrForbidden", err)
+	}
+	if info, _ := os.Stat(filepath.Join(outside, "target.txt")); info.Mode().Perm() != 0o644 {
+		t.Fatalf("symlink target was chmodded: %v", info.Mode().Perm())
+	}
+
+	if err := f.Chmod("/missing", 0o644); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("missing chmod error = %v, want os.ErrNotExist", err)
+	}
+	if err := f.Chmod("/", 0o755); !errors.Is(err, ErrRootOperation) {
+		t.Fatalf("root chmod error = %v, want ErrRootOperation", err)
 	}
 }
